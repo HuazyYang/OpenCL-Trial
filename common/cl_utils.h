@@ -2,6 +2,7 @@
 
 #include <CL/cl.h>
 #include <assert.h>
+#include <type_traits>
 
 #pragma once
 
@@ -47,7 +48,7 @@ void CLUtilsTrace(CLHRESULT hr, const char *fmt, ...);
 inline ptrdiff_t AlignUp(ptrdiff_t ptr, size_t alignment) {
   size_t mask = alignment - 1;
   RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
-  if ((alignment & mask) == 0)
+  if ((alignment & mask) != 0)
     ptr = (ptr + mask) & ~mask;
   return ptr;
 }
@@ -55,9 +56,17 @@ inline ptrdiff_t AlignUp(ptrdiff_t ptr, size_t alignment) {
 inline ptrdiff_t AlignDown(ptrdiff_t ptr, size_t alignment) {
   size_t mask = alignment - 1;
   RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
-  if ((alignment & mask) == 0)
+  if ((alignment & mask) != 0)
     ptr = ptr & ~mask;
   return ptr;
+}
+
+inline size_t RoundF(size_t c, size_t alignment) {
+  size_t mask = alignment - 1;
+  RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
+  if ((c & mask) != 0)
+    c = (c + mask) & ~mask;
+  return c;
 }
 
 enum class CLX_OBJECT_TYPE {
@@ -137,6 +146,11 @@ public:
     p.ptr_ = nullptr;
     return *this;
   }
+  CLxObjectSPtr& operator = (nullptr_t p) {
+    InternalRelease(ptr_);
+    ptr_ = nullptr;
+    return *this;
+  }
   CLxObjectSPtr operator <<= (ObjType p) {
     Attach(p);
     return *this;
@@ -146,6 +160,12 @@ public:
     p.ptr_ = nullptr;
     return *this;
   }
+  bool operator==(ObjType p) const { return ptr_ == p; }
+  bool operator==(const CLxObjectSPtr &p) const { return ptr_ == p.ptr_; }
+  bool operator==(nullptr_t) const { return ptr_ == nullptr; }
+  bool operator!=(ObjType p) const { return ptr_ != p; }
+  bool operator!=(const CLxObjectSPtr &p) const { return ptr_ != p.ptr_; }
+  bool operator!=(nullptr_t) const { return ptr_ != nullptr; }
 
   operator ObjType() const { return ptr_; }
   ObjType* operator&() {
@@ -153,6 +173,17 @@ public:
   }
   ObjType const* operator &() const { return &ptr_; }
 
+  ObjType* GetAddressOf() {
+    return &ptr_;
+  }
+  ObjType const *GetAddressOf() const {
+    return &ptr_;
+  }
+  ObjType *ReleaseAndGetAddressOf() {
+    InternalRelease(ptr_);
+    ptr_ = nullptr;
+    return &ptr_;
+  }
 protected:
   CLX_REFRET_T InternalAddRef(ObjType p) {
     CLX_REFRET_T ref = CL_SUCCESS;
@@ -181,3 +212,44 @@ using ycl_mem = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::MEM_OBJECT>;
 using ycl_buffer = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::BUFFER>;
 using ycl_image = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::IMAGE>;
 using ycl_sampler = CLxObjectSPtr<cl_sampler, CLX_OBJECT_TYPE::SAMPLER>;
+
+extern CLHRESULT FindOpenCLPlatform(const char *preferred_plat, cl_device_type dev_type, cl_platform_id *plat_id);
+
+extern CLHRESULT CreateDeviceContext(
+  cl_platform_id plat_id, cl_device_type dev_type, cl_device_id *dev, cl_context *dev_ctx);
+
+extern CLHRESULT CreateCommandQueue(cl_context dev_ctx, cl_device_id device, cl_command_queue *cmd_queue);
+
+extern CLHRESULT CreateProgramFromSource(
+  cl_context context, cl_device_id device, const char *source, size_t src_len, cl_program *program);
+
+extern CLHRESULT CreateProgramFromFile(
+  cl_context context, cl_device_id device, const char *fname, cl_program *program);
+
+template<typename ...TArgs> struct __SetKernelArgumentsImpl {
+private:
+  template <class T>
+  CLHRESULT _SetKernelArg(cl_kernel kernel, size_t i, const T &arg) const {
+    size_t arg_len = sizeof(*arg);
+    return clSetKernelArg(kernel, i, arg_len, arg);
+  }
+  template <>
+  CLHRESULT _SetKernelArg<size_t>(cl_kernel kernel, size_t i, const size_t &arg) const {
+    return clSetKernelArg(kernel, i, arg, nullptr);
+  }
+public:
+  template<size_t ...I>
+  CLHRESULT Set(cl_kernel kernel, std::index_sequence<I...> indices, const TArgs& ...args) {
+    CLHRESULT hr;
+    hr = ((_SetKernelArg(kernel, I, args)) | ...);
+    return hr;
+  }
+};
+
+template<typename ...TArgs>
+CLHRESULT SetKernelArguments(cl_kernel kernel, const TArgs& ...args) {
+
+  __SetKernelArgumentsImpl<TArgs...> __impl;
+
+  return __impl.Set(kernel, std::make_index_sequence<sizeof...(TArgs)>{}, args...);
+}

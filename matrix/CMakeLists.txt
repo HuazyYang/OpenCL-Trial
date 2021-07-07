@@ -1,16 +1,17 @@
-project(hello_word)
-
-set(src_files
-  main.cpp
-)
+project(matrix)
 
 set(ocl_src_files
-  simple.cl
+  matrix.cl
 )
 
 add_executable(
   ${PROJECT_NAME}
-  ${src_files}
+  main.cpp
+)
+target_link_libraries(
+  ${PROJECT_NAME}
+  common
+  OpenCL
 )
 
 copy_assets(ocl_src_files "" copied_${PROJECT_NAME}_ocl_files)
@@ -18,9 +19,4 @@ copy_assets(ocl_src_files "" copied_${PROJECT_NAME}_ocl_files)
 add_custom_target(
   ${PROJECT_NAME}CopyOCLFiles ALL
   DEPENDS ${copied_${PROJECT_NAME}_ocl_files}
-)
-target_link_libraries(
-  ${PROJECT_NAME}
-  common
-  OpenCL
 )

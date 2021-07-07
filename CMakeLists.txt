@@ -18,6 +18,9 @@ endif()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildUtilities.cmake")
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(COMMON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 include_directories("$ENV{INTELOCLSDKROOT}/include")
@@ -36,4 +39,7 @@ project(OpenGL-Trial VERSION 0.1.0)
 # Set target OpenCL version to 2.0
 add_compile_options("/DCL_TARGET_OPENCL_VERSION=200")
 
+add_subdirectory(common)
 add_subdirectory(hello_world)
+add_subdirectory(gpu_profile)
+add_subdirectory(matrix)
