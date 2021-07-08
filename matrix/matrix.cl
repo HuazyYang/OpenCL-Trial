@@ -28,14 +28,15 @@ __kernel void mat_transpose_opt1(__global const REAL *in, __global REAL *out, in
   int2 threadIdx = (int2)(get_local_id(0), get_local_id(1));
   const int2 blockSize = (int2)(LOCAL_SIZE_X, LOCAL_SIZE_Y);
   int2 i = blockIdx * blockSize + threadIdx;
+  int2 ii = (int2)(i.x+i.y*M, i.x+i.y*M);
 
   if(i.x < M &&  i.y < N)
-    tile[threadIdx.y][threadIdx.x] = in[i.x + i.y*M];
+    tile[threadIdx.y][threadIdx.x] = in[ii.x];
   barrier(CLK_LOCAL_MEM_FENCE);
 
   i = (int2)(blockIdx.y, blockIdx.x) * blockSize + threadIdx;
   if(i.x < N && i.y < M)
-    out[i.x+i.y*N] = tile[threadIdx.x][threadIdx.y];
+    out[ii.y] = tile[threadIdx.x][threadIdx.y];
 }
 
 // Eliminate bank conflict.
@@ -49,14 +50,15 @@ __kernel void mat_transpose_opt2(__global const REAL *in, __global REAL *out, in
   int2 threadIdx = (int2)(get_local_id(0), get_local_id(1));
   const int2 blockSize = (int2)(LOCAL_SIZE_X, LOCAL_SIZE_Y);
   int2 i = blockIdx * blockSize + threadIdx;
+  int2 ii = (int2)(i.x+i.y*M, i.x+i.y*M);
 
   if(i.x < M &&  i.y < N)
-    tile[threadIdx.y][threadIdx.x] = in[i.x + i.y*M];
+    tile[threadIdx.y][threadIdx.x] = in[ii.x];
   barrier(CLK_LOCAL_MEM_FENCE);
 
   i = (int2)(blockIdx.y, blockIdx.x) * blockSize + threadIdx;
   if(i.x < N && i.y < M)
-    out[i.x+i.y*N] = tile[threadIdx.x][threadIdx.y];
+    out[ii.y] = tile[threadIdx.x][threadIdx.y];
 }
 
 //
