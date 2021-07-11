@@ -78,6 +78,12 @@ CLHRESULT TestMatrixTransposeProfile(
   size_t gworksize[] = {RoundF(ncols, lworksize[0]), RoundF(nrows, lworksize[1])};
   ycl_event rd_done_ev;
 
+  size_t max_work_size[3];
+  V_RETURN(clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(max_work_size), max_work_size, nullptr));
+
+  gworksize[0] = std::min(gworksize[0], max_work_size[0]);
+  gworksize[1] = std::min(gworksize[0], max_work_size[1]);
+
   start = hp_timer::now();
   V_RETURN(clEnqueueNDRangeKernel(cmd_queue, ker, 2, nullptr, gworksize, nullptr, 0, nullptr, nullptr));
   V_RETURN(clEnqueueReadBuffer(cmd_queue, output_mat_buff, false, 0, mat_buff_size, (void *)test_mat.data(), 0, nullptr,

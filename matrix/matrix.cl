@@ -11,10 +11,13 @@
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose(__global const REAL *in, __global REAL *out, int M, int N) {
 
-  int2 global_id = (int2)(get_global_id(0), get_global_id(1));
+  const int2 gid = (int2)(get_global_id(0), get_global_id(1));
+  const int2 gsize = (int2)(get_global_size(0), get_global_size(1));
 
-  if(global_id.x < M && global_id.y < N)
-    out[global_id.y + global_id.x*N] = in[global_id.x + global_id.y*M];
+  for(uint i = gid.y; i < N; i += gsize.y) {
+    for(uint j = gid.x; j < M; j += gsize.x)
+      out[i + j * N] = in[j + i*M];
+  }
 }
 
 // Merge access optimization
@@ -22,21 +25,21 @@ __kernel void mat_transpose(__global const REAL *in, __global REAL *out, int M, 
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose_opt1(__global const REAL *in, __global REAL *out, int M, int N) {
 
-    __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X];
+  __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X];
+  const int2 gid = (int2)(get_global_id(0), get_global_id(1));
+  const int2 gsize = (int2)(get_global_size(0), get_global_size(1));
+  const int2 tid = (int2)(get_local_id(0), get_local_id(1));
 
-  int2 blockIdx = (int2)(get_group_id(0), get_group_id(1));
-  int2 threadIdx = (int2)(get_local_id(0), get_local_id(1));
-  const int2 blockSize = (int2)(LOCAL_SIZE_X, LOCAL_SIZE_Y);
-  int2 i = blockIdx * blockSize + threadIdx;
-  int2 ii = (int2)(i.x+i.y*M, i.x+i.y*M);
+  for(uint i = gid.y; i < N; i += gsize.y) {
+    for(uint j = gid.x; j < M; j += gsize.x) {
+      tile[tid.y][tid.x] = in[j + i*M];
+      barrier(CLK_LOCAL_MEM_FENCE);
 
-  if(i.x < M &&  i.y < N)
-    tile[threadIdx.y][threadIdx.x] = in[ii.x];
-  barrier(CLK_LOCAL_MEM_FENCE);
-
-  i = (int2)(blockIdx.y, blockIdx.x) * blockSize + threadIdx;
-  if(i.x < N && i.y < M)
-    out[ii.y] = tile[threadIdx.x][threadIdx.y];
+      int2 ii = (int2)(i - tid.y + tid.x, j - tid.x + tid.y);
+      if(ii.x < N && ii.y < M)
+        out[j + i*M] = tile[tid.x][tid.y];
+    }
+  }
 }
 
 // Eliminate bank conflict.
@@ -45,20 +48,20 @@ __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose_opt2(__global const REAL *in, __global REAL *out, int M, int N) {
 
   __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X+1];
+  const int2 gid = (int2)(get_global_id(0), get_global_id(1));
+  const int2 gsize = (int2)(get_global_size(0), get_global_size(1));
+  const int2 tid = (int2)(get_local_id(0), get_local_id(1));
 
-  int2 blockIdx = (int2)(get_group_id(0), get_group_id(1));
-  int2 threadIdx = (int2)(get_local_id(0), get_local_id(1));
-  const int2 blockSize = (int2)(LOCAL_SIZE_X, LOCAL_SIZE_Y);
-  int2 i = blockIdx * blockSize + threadIdx;
-  int2 ii = (int2)(i.x+i.y*M, i.x+i.y*M);
+  for(uint i = gid.y; i < N; i += gsize.y) {
+    for(uint j = gid.x; j < M; j += gsize.x) {
+      tile[tid.y][tid.x] = in[j + i*M];
+      barrier(CLK_LOCAL_MEM_FENCE);
 
-  if(i.x < M &&  i.y < N)
-    tile[threadIdx.y][threadIdx.x] = in[ii.x];
-  barrier(CLK_LOCAL_MEM_FENCE);
-
-  i = (int2)(blockIdx.y, blockIdx.x) * blockSize + threadIdx;
-  if(i.x < N && i.y < M)
-    out[ii.y] = tile[threadIdx.x][threadIdx.y];
+      int2 ii = (int2)(i - tid.y + tid.x, j - tid.x + tid.y);
+      if(ii.x < N && ii.y < M)
+        out[j + i*M] = tile[tid.x][tid.y];
+    }
+  }
 }
 
 //
