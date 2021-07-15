@@ -26,6 +26,7 @@ void CLUtilsTrace(CLHRESULT hr, const char *fmt, ...);
 #endif
 #ifndef V_RETURN
 #define V_RETURN(x)    { hr = (x); if( hr != CL_SUCCESS ) { CL_TRACE(hr, #x), assert( 0 ); return hr; } }
+#define V_RETURN2(x,...) { hr = (x,##__VA_ARGS__);  if( hr != CL_SUCCESS ) { CL_TRACE(hr, #x), assert( 0 ); return hr; } }
 #endif
 #else
 #ifndef V
@@ -33,6 +34,7 @@ void CLUtilsTrace(CLHRESULT hr, const char *fmt, ...);
 #endif
 #ifndef V_RETURN
 #define V_RETURN(x)    { hr = (x); if( hr != CL_SUCCESS ) { return hr; } }
+#define V_RETURN2(x,...) { hr = (x,##__VA_ARGS__);  if( hr != CL_SUCCESS ) { return hr; } }
 #endif
 #endif
 
@@ -61,11 +63,18 @@ inline ptrdiff_t AlignDown(ptrdiff_t ptr, size_t alignment) {
   return ptr;
 }
 
-inline size_t RoundF(size_t c, size_t alignment) {
+inline size_t RoundC(size_t c, size_t alignment) {
   size_t mask = alignment - 1;
   RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
   if ((c & mask) != 0)
     c = (c + mask) & ~mask;
+  return c;
+}
+inline size_t RoundF(size_t c, size_t alignment) {
+  size_t mask = alignment - 1;
+  RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
+  if ((c & mask) != 0)
+    c = c & ~mask;
   return c;
 }
 
@@ -213,7 +222,12 @@ using ycl_buffer = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::BUFFER>;
 using ycl_image = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::IMAGE>;
 using ycl_sampler = CLxObjectSPtr<cl_sampler, CLX_OBJECT_TYPE::SAMPLER>;
 
-extern CLHRESULT FindOpenCLPlatform(const char *preferred_plat, cl_device_type dev_type, cl_platform_id *plat_id);
+/**
+ * @param preferred_plats is a string of string terminated with nullptr.
+ * 
+ */
+extern CLHRESULT
+FindOpenCLPlatform(const char *const *preferred_plats, cl_device_type dev_type, cl_platform_id *plat_id);
 
 extern CLHRESULT CreateDeviceContext(
   cl_platform_id plat_id, cl_device_type dev_type, cl_device_id *dev, cl_context *dev_ctx);
@@ -221,10 +235,10 @@ extern CLHRESULT CreateDeviceContext(
 extern CLHRESULT CreateCommandQueue(cl_context dev_ctx, cl_device_id device, cl_command_queue *cmd_queue);
 
 extern CLHRESULT CreateProgramFromSource(
-  cl_context context, cl_device_id device, const char *source, size_t src_len, cl_program *program);
+  cl_context context, cl_device_id device, const char *defines, const char *source, size_t src_len, cl_program *program);
 
 extern CLHRESULT CreateProgramFromFile(
-  cl_context context, cl_device_id device, const char *fname, cl_program *program);
+    cl_context context, cl_device_id device, const char *defines, const char *fname, cl_program *program);
 
 template<typename ...TArgs> struct __SetKernelArgumentsImpl {
 private:

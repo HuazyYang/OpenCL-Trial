@@ -1,18 +1,12 @@
-project(matrix)
+project(pixels_histogram)
 
 set(ocl_src_files
-  matrix.cl
-  mat_mul_vec.cl
+  histo.cl
 )
 
 add_executable(
   ${PROJECT_NAME}
   main.cpp
-)
-target_compile_options(
-  ${PROJECT_NAME}
-  PRIVATE
-  "/Qvec-report:1"
 )
 target_link_libraries(
   ${PROJECT_NAME}

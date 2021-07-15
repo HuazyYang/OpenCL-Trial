@@ -93,12 +93,14 @@ void CLUtilsTrace(CLHRESULT hr, const char *fmt, ...) {
   va_end(vlist);
 
   OutputDebugStringA(buff);
+  OutputDebugStringA("\n");
 }
 #else
 void CLUtilsTrace(CLHRESULT hr, const char *fmt, ...) {
   va_list vlist;
   va_start(vlist, fmt);
   vfprintf(stderr, fmt, vlist);
+  fprintf(stderr, "\n");
 }
 #endif
 
@@ -118,7 +120,7 @@ CLX_OBJECT_REFCOUNT_MGR_TABLE_ENTRY g_CLxObjectRefcountMgrTable[(int)CLX_OBJECT_
     {(CLX_OBJECT_ADDREF)clRetainSampler, (CLX_OBJECT_RELEASE)clReleaseSampler},
 };
 
-CLHRESULT FindOpenCLPlatform(const char *preferred_plat, cl_device_type dev_type, cl_platform_id *plat_id) {
+CLHRESULT FindOpenCLPlatform(const char * const* preferred_plats, cl_device_type dev_type, cl_platform_id *plat_id) {
 
   CLHRESULT hr;
   cl_uint numPlatform;
@@ -135,7 +137,7 @@ CLHRESULT FindOpenCLPlatform(const char *preferred_plat, cl_device_type dev_type
 
   V_RETURN(clGetPlatformIDs(numPlatform, &platforms[0], nullptr));
 
-  if (preferred_plat != nullptr && preferred_plat[0]) {
+  if (preferred_plats != nullptr && preferred_plats[0]) {
 
     size_t nlength;
     std::vector<char> name;
@@ -150,18 +152,20 @@ CLHRESULT FindOpenCLPlatform(const char *preferred_plat, cl_device_type dev_type
 
       V_RETURN(clGetPlatformInfo(*itPlat, CL_PLATFORM_NAME, nlength, &name[0], nullptr));
 
-      if (_stricmp(name.data(), preferred_plat) == 0) {
-
-        V_RETURN(clGetDeviceIDs(*itPlat, dev_type, 0, nullptr, &numDevices));
-        if (numDevices == 0) {
-          hr = -1;
-          CL_TRACE(hr, "Error: Required device type does not exist on specified platform!\n");
-          return hr;
+      for(const char * const *plat = preferred_plats; plat != nullptr; ++plat) {
+        if(_strnicmp(name.data(), *plat, strlen(*plat)) == 0) {
+          V_RETURN(clGetDeviceIDs(*itPlat, dev_type, 0, nullptr, &numDevices));
+          if (numDevices == 0) {
+            hr = -1;
+            CL_TRACE(hr, "Error: Required device type does not exist on specified platform!\n");
+            return hr;
+          }
+          plat_id2 = *itPlat;
+          break;
         }
-
-        plat_id2 = *itPlat;
-        break;
       }
+
+      if(plat_id2) break;
     }
   } else {
     plat_id2 = platforms[0];
@@ -227,26 +231,59 @@ CLHRESULT CreateCommandQueue(cl_context dev_ctx, cl_device_id device, cl_command
 }
 
 CLHRESULT CreateProgramFromSource(
-    cl_context context, cl_device_id device, const char *source, size_t src_len, cl_program *program) {
+    cl_context context, cl_device_id device, const char *defines, const char *source, size_t src_len, cl_program *program) {
 
   CLHRESULT hr;
-  char predefines[] =
-    "#define REAL double\n"       \
-    "#define REAL2 double2\n"     \
-    "#define REAL3 double3\n"     \
-    "#define REAL4 double4\n"     \
-    "#define REAL16 double16\n"   \
-    "#define REAL2x2 double2x2\n" \
-    "#define REAL3x3 double3x3\n" \
-    "#define REAL4x4 double4x4\n" \
-    ;
-  const char *sources[] = {predefines, source};
-  size_t src_lens[] = {_countof(predefines) - 1, src_len};
+  char internal_defs[] =
+      R"(
+/** check fp arithmetic format */
+#ifdef _USE_DOUBLE_FP
+  #define REAL    double
+  #define REAL2   double2
+  #define REAL3   double3
+  #define REAL4   double4 
+  #define REAL16  double16
+  #define REAL2x2 double2x2
+  #define REAL3x3 double3x3
+  #define REAL4x4 double4x4
 
-  *program = clCreateProgramWithSource(context, 2, sources, src_lens, &hr);
+  /** enable fp64 extension */
+  #if defined(cl_amd_fp64)
+      #pragma OPENCL EXTENSION cl_amd_fp64 : enable
+  #elif defined(cl_khr_fp64)
+      #pragma OPENCL EXTENSION cl_khr_fp64 : enable
+  #endif /** enable fp64 extension */
+#else /** _USE_DOUBLE_FP */
+  #define REAL    float
+  #define REAL2   float2
+  #define REAL3   float3
+  #define REAL4   float4 
+  #define REAL16  float16
+  #define REAL2x2 float2x2
+  #define REAL3x3 float3x3
+  #define REAL4x4 float4x4
+#endif /** _USE_DOUBLE_FP */
+)";
+
+  if(!defines) defines = "";
+
+  const char *sources[] = {defines, internal_defs, source};
+  size_t src_lens[] = {strlen(defines), _countof(internal_defs) - 1, src_len};
+
+  char tempbuff[256];
+  V_RETURN(clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, sizeof(tempbuff), tempbuff, nullptr));
+  char *token_ctx;
+  char *pver = strtok_s(tempbuff, " ", &token_ctx);
+  pver = strtok_s(nullptr, " ", &token_ctx);
+  pver = strtok_s(nullptr, " ", &token_ctx);
+
+  char cl_optbuff[128];
+  sprintf_s(cl_optbuff, _countof(cl_optbuff), "-cl-std=CL%s", pver);
+
+  *program = clCreateProgramWithSource(context, _countof(sources), sources, src_lens, &hr);
   V_RETURN(hr);
 
-  hr = clBuildProgram(*program, 1, &device, "", nullptr, nullptr);
+  hr = clBuildProgram(*program, 1, &device, cl_optbuff, nullptr, nullptr);
   if (hr == CL_BUILD_PROGRAM_FAILURE) {
     size_t log_size = 0;
     std::vector<char> build_log;
@@ -266,7 +303,8 @@ CLHRESULT CreateProgramFromSource(
   return hr;
 }
 
-CLHRESULT CreateProgramFromFile(cl_context context, cl_device_id device, const char *fname, cl_program *program) {
+CLHRESULT CreateProgramFromFile(
+    cl_context context, cl_device_id device, const char *defines, const char *fname, cl_program *program) {
 
   CLHRESULT hr;
 
@@ -284,5 +322,5 @@ CLHRESULT CreateProgramFromFile(cl_context context, cl_device_id device, const c
   fin.read((char *)source.data(), srclen);
   fin.close();
 
-  return CreateProgramFromSource(context, device, source.data(), srclen, program);
+  return CreateProgramFromSource(context, device, defines, source.data(), srclen, program);
 }

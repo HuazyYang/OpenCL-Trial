@@ -23,6 +23,8 @@ int main() {
   printf("  device vendor: %s\n", nbuff);
   V_RETURN(clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(nbuff), nbuff, 0));
   printf("  device version: %s\n", nbuff);
+  V_RETURN(clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, sizeof(nbuff), nbuff, 0));
+  printf("  device OpenCL C version: %s\n", nbuff);
 
   printf("  memory info:\n");
   V_RETURN(clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, sizeof(mem_size), &mem_size, 0));

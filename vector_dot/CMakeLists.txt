@@ -1,18 +1,12 @@
-project(matrix)
+project(vector_dot VERSION 0.1.0)
 
 set(ocl_src_files
-  matrix.cl
-  mat_mul_vec.cl
+  vector_dot.cl
 )
 
 add_executable(
   ${PROJECT_NAME}
   main.cpp
-)
-target_compile_options(
-  ${PROJECT_NAME}
-  PRIVATE
-  "/Qvec-report:1"
 )
 target_link_libraries(
   ${PROJECT_NAME}

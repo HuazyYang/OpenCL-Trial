@@ -1,10 +1,3 @@
-
-#if defined(cl_amd_fp64)
-    #pragma OPENCL EXTENSION cl_amd_fp64 : enable
-#elif defined(cl_khr_fp64)
-    #pragma OPENCL EXTENSION cl_khr_fp64 : enable
-#endif
-
 #define LOCAL_SIZE_X    16
 #define LOCAL_SIZE_Y    16
 
@@ -25,19 +18,23 @@ __kernel void mat_transpose(__global const REAL *in, __global REAL *out, int M, 
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose_opt1(__global const REAL *in, __global REAL *out, int M, int N) {
 
-  __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X];
+  __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X + 1];
   const int2 gid = (int2)(get_global_id(0), get_global_id(1));
   const int2 gsize = (int2)(get_global_size(0), get_global_size(1));
   const int2 tid = (int2)(get_local_id(0), get_local_id(1));
+  const int M_ru = (M + LOCAL_SIZE_X - 1) & ~(LOCAL_SIZE_X - 1);
+  const int N_ru = (N + LOCAL_SIZE_Y - 1) & ~(LOCAL_SIZE_Y - 1);
 
-  for(uint i = gid.y; i < N; i += gsize.y) {
-    for(uint j = gid.x; j < M; j += gsize.x) {
-      tile[tid.y][tid.x] = in[j + i*M];
+  for(uint i = gid.y; i < N_ru; i += gsize.y) {
+    for(uint j = gid.x; j < M_ru; j += gsize.x) {
+      if(j < M && i < N)
+        tile[tid.y][tid.x] = in[j + i*M];
       barrier(CLK_LOCAL_MEM_FENCE);
 
-      int2 ii = (int2)(i - tid.y + tid.x, j - tid.x + tid.y);
+      int2 ii = (int2)(i - tid.y, j - tid.x) + tid;
       if(ii.x < N && ii.y < M)
-        out[j + i*M] = tile[tid.x][tid.y];
+        out[ii.x + ii.y*N] = tile[tid.x][tid.y];
+      barrier(CLK_LOCAL_MEM_FENCE);
     }
   }
 }
@@ -45,23 +42,39 @@ __kernel void mat_transpose_opt1(__global const REAL *in, __global REAL *out, in
 // Eliminate bank conflict.
 // 'dims' have components "M, N, max(M, N)"
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
-__kernel void mat_transpose_opt2(__global const REAL *in, __global REAL *out, int M, int N) {
+__kernel void mat_transpose_opt2(__global const REAL *in, __global REAL *out, uint M, uint N) {
 
-  __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X+1];
-  const int2 gid = (int2)(get_global_id(0), get_global_id(1));
-  const int2 gsize = (int2)(get_global_size(0), get_global_size(1));
-  const int2 tid = (int2)(get_local_id(0), get_local_id(1));
+#ifdef _USE_DOUBLE_FP
+  __local uint tile[2*LOCAL_SIZE_Y][LOCAL_SIZE_X + 1];
+  const uint2 gid = (uint2)(get_global_id(0), get_global_id(1));
+  const uint2 gsize = (uint2)(get_global_size(0), get_global_size(1));
+  const uint2 tid = (uint2)(get_local_id(0), get_local_id(1));
+  const uint M_ru = (M + LOCAL_SIZE_X - 1) & ~(LOCAL_SIZE_X - 1);
+  const uint N_ru = (N + LOCAL_SIZE_Y - 1) & ~(LOCAL_SIZE_Y - 1);
+  const uint2 tile_offset_tid = tid + (uint2)(LOCAL_SIZE_Y, LOCAL_SIZE_Y);
 
-  for(uint i = gid.y; i < N; i += gsize.y) {
-    for(uint j = gid.x; j < M; j += gsize.x) {
-      tile[tid.y][tid.x] = in[j + i*M];
+  for(uint i = gid.y; i < N_ru; i += gsize.y) {
+    for(uint j = gid.x; j < M_ru; j += gsize.x) {
+      uint2 tempu64;
+
+      if(j < M && i < N) {
+        tempu64 = as_uint2(in[j + i*M]);
+        tile[tid.y][tid.x] = tempu64.x;
+        tile[tile_offset_tid.y][tid.x] = tempu64.y;
+      }
       barrier(CLK_LOCAL_MEM_FENCE);
 
-      int2 ii = (int2)(i - tid.y + tid.x, j - tid.x + tid.y);
-      if(ii.x < N && ii.y < M)
-        out[j + i*M] = tile[tid.x][tid.y];
+      uint2 ii = (uint2)(i - tid.y, j - tid.x) + tid;
+      if(ii.x < N && ii.y < M) {
+        tempu64 = (uint2)(tile[tid.x][tid.y], tile[tile_offset_tid.x][tid.y]);
+        out[ii.x + ii.y*N] = as_double(tempu64);
+      }
+      barrier(CLK_LOCAL_MEM_FENCE);
     }
   }
+#else
+  mat_transpose_opt1(in, out, M, N);
+#endif
 }
 
 //

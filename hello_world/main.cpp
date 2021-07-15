@@ -166,7 +166,7 @@ int main() {
   fin.read(src_buffer.data(), src_buffer_len);
   fin.close();
 
-  V_RETURN(CreateProgramFromSource(context, device, src_buffer.data(), src_buffer_len, program.ReleaseAndGetAddressOf()));
+  V_RETURN(CreateProgramFromSource(context, device, "#define _USE_DOUBLE_FP", src_buffer.data(), src_buffer_len, program.ReleaseAndGetAddressOf()));
   src_buffer.clear();
 
   TestAddSample(context, cmd_queue, program);

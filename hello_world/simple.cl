@@ -1,11 +1,4 @@
 
-#if defined(cl_amd_fp64) || defined(cl_khr_fp64)
-  #if defined(cl_amd_fp64)
-      #pragma OPENCL EXTENSION cl_amd_fp64 : enable
-  #elif defined(cl_khr_fp64)
-      #pragma OPENCL EXTENSION cl_khr_fp64 : enable
-  #endif
-#endif
 
 const sampler_t bilin_sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;
 
