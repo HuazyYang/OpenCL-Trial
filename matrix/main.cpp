@@ -1,23 +1,13 @@
 #include <cl_utils.h>
+#include <common_miscs.h>
 #include <vector>
 #include <stdio.h>
-#include <random>
-#include <chrono>
 #include <array>
 #include <intrin.h>
 #include <immintrin.h>
 #include <type_traits>
 
-using hp_timer = std::chrono::high_resolution_clock;
-using fmilliseconds = std::chrono::duration<float, std::milli>;
-
 #define __AVX2_ALIGNED   __declspec(align(32))
-
-std::default_random_engine g_RandomEngine{[]() -> std::random_device::result_type {
-  std::random_device rdev;
-  return rdev();
-}()};
-
 
 template <class REAL> static std::vector<REAL> gen_random_matrix(size_t cols, size_t rows) {
 
