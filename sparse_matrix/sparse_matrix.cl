@@ -35,7 +35,7 @@ __kernel void smm_warp_per_row(
   __global const REAL *vec_vals,
   __global REAL * restrict res_vals
 ) {
-  __local REAL tile[WARP_LOCAL_SIZE_Y];
+  __local REAL tile[WARP_LOCAL_SIZE_Y][WARP_LOCAL_SIZE_X];
 
   const uint2 tid = (uint2)(get_local_id(0), get_local_id(1));
   const uint2 bcount = (uint2)(get_num_groups(0), get_num_groups(1));
@@ -49,7 +49,7 @@ __kernel void smm_warp_per_row(
 
   for(uint i = warpid; i < row_size_rc; i += warp_count) {
 
-    tile[tid.y] = 0.0;
+    tile[tid.y][tid.x] = 0.0;
     barrier(CLK_LOCAL_MEM_FENCE);
 
     uint ii = i < row_size ? i : row_bound;
@@ -59,10 +59,21 @@ __kernel void smm_warp_per_row(
       temp += mat_vals[cpos.x] * vec_vals[col_idx[cpos.x]];
     }
     // For warp size >= 32, NO synchronizing point is needed.
-    tile[tid.y] += temp;
+    tile[tid.y][tid.x] = temp;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    if(tid.x == 0 && i < row_size)
-      res_vals[i] = tid[tid.y];
+    if(tid.x < 16)
+      tile[tid.y][tid.x] += tile[tid.y][tid.x + 16];
+    if(tid.x < 8)
+      tile[tid.y][tid.x] += tile[tid.y][tid.x + 8];
+    if(tid.x < 4)
+      tile[tid.y][tid.x] += tile[tid.y][tid.x + 4];
+    if(tid.x < 2)
+      tile[tid.y][tid.x] += tile[tid.y][tid.x + 2];
+    if(tid.x < 1) {
+      tile[tid.y][0] += tile[tid.y][1];
+      if(i < row_size)
+        res_vals[i] = tile[tid.y][0];
+    }
   }
 }

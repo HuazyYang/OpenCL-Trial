@@ -217,7 +217,7 @@ CLHRESULT TestCsrMatMulVec(cl_context context, cl_device_id device, cl_command_q
 
   csr_mat_mul_vec(&mat, &vec, &res);
 
-  size_t mat_row_ptr_buff_size = mat.rows * sizeof(uint32_t);
+  size_t mat_row_ptr_buff_size = (mat.rows + 1)* sizeof(uint32_t);
   size_t mat_col_idx_buff_size = mat.row_ptr[mat.rows] * sizeof(uint16_t);
   size_t mat_vals_buff_size = mat.row_ptr[mat.rows] * sizeof(double);
   size_t vec_vals_buff_size = vec.rows * sizeof(double);
@@ -269,6 +269,26 @@ CLHRESULT TestCsrMatMulVec(cl_context context, cl_device_id device, cl_command_q
 
   printf("Results coincidence: %s\n", check_matrix_equiv(res2.vals, res.vals, res.rows, 1.0E-6, 1, res.rows) ? "true" : "false");
 
+  V_RETURN2(kernel <<= clCreateKernel(g_pSparseMatrixProgram, "smm_warp_per_row", &hr), hr);
+  V_RETURN(clGetKernelWorkGroupInfo(kernel, device, CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(work_group_size),
+                                    work_group_size, nullptr));
+
+  work_item_size[0] = std::min(max_work_item_size[0], (size_t)mat.rows);
+  work_item_size[1] = work_group_size[1];
+
+  V_RETURN(SetKernelArguments(kernel, &row_size, &mat_row_ptr_buffer, &mat_col_idx_buffer, &mat_vals_buffer,
+                              &vec_vals_buffer, &res_vals_buffer));
+  V_RETURN(clEnqueueFillBuffer(cmd_queue, res_vals_buffer, &zfpattern, sizeof(zfpattern), 0, res_vals_buff_size, 0,
+                               nullptr, nullptr));
+  V_RETURN(clEnqueueNDRangeKernel(cmd_queue, kernel, 2, nullptr, work_item_size, work_group_size, 0, nullptr, nullptr));
+  V_RETURN(clEnqueueReadBuffer(cmd_queue, res_vals_buffer, false, 0, res_vals_buff_size, res2.vals, 0, nullptr,
+                               done_ev.ReleaseAndGetAddressOf()));
+  V_RETURN(clFlush(cmd_queue));
+  V_RETURN(clWaitForEvents(1, &done_ev));
+
+  printf("Results coincidence: %s\n",
+         check_matrix_equiv(res2.vals, res.vals, res.rows, 1.0E-5, 1, res.rows) ? "true" : "false");
+
   csr_mat_destroy(&mat);
   raw_vector_destroy(&vec);
   raw_vector_destroy(&res);
@@ -291,6 +311,6 @@ int main() {
 
   V_RETURN(CreateProgramFromFile(context, device, "#define _USE_DOUBLE_FP", "sparse_matrix.cl", &g_pSparseMatrixProgram));
 
-  std::uniform_int_distribution<uint16_t> mat_nrows_distr(16, 500), mat_ncols_distr(16, 500);
+  std::uniform_int_distribution<uint16_t> mat_nrows_distr(16, 10000), mat_ncols_distr(16, 10000);
   TestCsrMatMulVec(context, device, cmd_queue, mat_nrows_distr(g_RandomEngine), mat_ncols_distr(g_RandomEngine));
 }
