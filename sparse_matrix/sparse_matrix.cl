@@ -2,7 +2,7 @@
 #define LOCAL_SIZE_X    64
 
 #define WARP_LOCAL_SIZE_X   32
-#define WARP_LOCAL_SIZE_Y   4
+#define WARP_LOCAL_SIZE_Y   2
 
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, 1, 1)))
 __kernel void smm_native(
@@ -48,9 +48,6 @@ __kernel void smm_warp_per_row(
   const uint row_bound = row_size - 1;
 
   for(uint i = warpid; i < row_size_rc; i += warp_count) {
-
-    tile[tid.y][tid.x] = 0.0;
-    barrier(CLK_LOCAL_MEM_FENCE);
 
     uint ii = i < row_size ? i : row_bound;
     uint2 cpos = (uint2)(row_ptr[ii] + tid.x, row_ptr[ii+1]);
