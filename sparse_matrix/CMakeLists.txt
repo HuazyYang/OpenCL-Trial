@@ -1,6 +1,7 @@
 project(sparse_matrix)
 
 set(ocl_src_files
+  sparse_matrix.cl
 )
 
 add_executable(

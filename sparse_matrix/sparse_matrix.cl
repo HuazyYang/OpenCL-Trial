@@ -7,7 +7,7 @@
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, 1, 1)))
 __kernel void smm_native(
   uint row_size,
-  __global const ushort *row_ptr,
+  __global const uint *row_ptr,
   __global const ushort *col_idx,
   __global const REAL *mat_vals,
   __global const REAL *vec_vals,
@@ -19,7 +19,7 @@ __kernel void smm_native(
   for(uint i = gid; i < row_size; i += gsize) {
     REAL temp = 0.0;
     uint2 cpos = (uint2)(row_ptr[i], row_ptr[i+1]);
-    for(; cpos.x < cpos.y; ++cpos.x) {
+    for(; cpos.x != cpos.y; ++cpos.x) {
       temp += mat_vals[cpos.x] * vec_vals[col_idx[cpos.x]];
     }
     res_vals[i] = temp;
@@ -29,7 +29,7 @@ __kernel void smm_native(
 __attribute__((reqd_work_group_size(WARP_LOCAL_SIZE_X, WARP_LOCAL_SIZE_Y, 1)))
 __kernel void smm_warp_per_row(
   uint row_size,
-  __global const ushort *row_ptr,
+  __global const uint *row_ptr,
   __global const ushort *col_idx,
   __global const REAL *mat_vals,
   __global const REAL *vec_vals,
