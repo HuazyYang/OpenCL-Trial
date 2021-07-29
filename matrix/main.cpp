@@ -121,7 +121,7 @@ bool check_matrix_equiv(
       ymm[0] = _mm256_permute2f128_pd(ymm[0], ymm[1], 0b00100000); /** ymm0: a0, b0, c0, d0 */    \
       ymm[1] = ymm4;                                               /** ymm1: a1, b1, c1, d1 */
 
-static void __mat_transpose_avx2_impl(
+static void __mat_transpose_avx2_4x8_impl(
   const double *mat,
   size_t nrows,
   size_t ncols,
@@ -134,7 +134,6 @@ static void __mat_transpose_avx2_impl(
   const size_t ncols_r8 = ncols & 7;
   const size_t ncols_r4 = ncols & 3;
   const size_t ncols_res_cb2 = ncols_r4 * sizeof(double);
-  const ptrdiff_t bidx_inc = 4 * nrows;
   ptrdiff_t i = 0;
   ptrdiff_t j;
 
@@ -301,51 +300,313 @@ static void __mat_transpose_avx2_impl(
   }
 }
 
-static void __mxm_avx2_impl(
+static void __mat_transpose_avx2_4x4_impl(
+  const double *mat,
+  size_t nrows,
+  size_t ncols,
+  double *mat_res
+) {
+  const size_t nrows_f4 = nrows & ~3;
+  const size_t nrows_r4 = nrows & 3;
+  const size_t nrows_res_cb = nrows_r4 * sizeof(double);
+  const size_t ncols_f4 = ncols & ~3;
+  const size_t ncols_r4 = ncols & 3;
+  const size_t ncols_res_cb = ncols_r4 * sizeof(double);
+  ptrdiff_t i, j;
+
+  __m256d ymm[4];
+  __m256d ymm4;
+  const __m256i bidx_base = _mm256_set_epi64x(3 * nrows, 2 * nrows, nrows, 0);
+  const __m256i bidx_inc4 = _mm256_set1_epi64x(4 * nrows);
+  const __m256i irows_inc4row = _mm256_set1_epi64x(3 * ncols + ncols_r4);
+  __m256i bidx;
+  __m256i irows = _mm256_set_epi64x(ncols * 3, ncols * 2, ncols * 1, 0);
+  __m256i irows_inc4 = _mm256_set1_epi64x(4);
+
+  for (i = 0; i < nrows_f4; i += 4) {
+    bidx = _mm256_add_epi64(bidx_base, _mm256_set1_epi64x(i));
+    for (j = 0; j < ncols_f4; j += 4) {
+
+      ymm[0] = _mm256_loadu_pd(mat + irows.m256i_u64[0]);
+      ymm[1] = _mm256_loadu_pd(mat + irows.m256i_u64[1]);
+      ymm[2] = _mm256_loadu_pd(mat + irows.m256i_u64[2]);
+      ymm[3] = _mm256_loadu_pd(mat + irows.m256i_u64[3]);
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      _mm256_storeu_pd(mat_res + bidx.m256i_u64[0], ymm[0]);
+      _mm256_storeu_pd(mat_res + bidx.m256i_u64[1], ymm[1]);
+      _mm256_storeu_pd(mat_res + bidx.m256i_u64[2], ymm[2]);
+      _mm256_storeu_pd(mat_res + bidx.m256i_u64[3], ymm[3]);
+      bidx = _mm256_add_epi64(bidx, bidx_inc4);
+
+      irows = _mm256_add_epi64(irows, irows_inc4);
+    }
+
+    if (ncols_r4 > 0) {
+      memcpy(&ymm[0], mat + irows.m256i_u64[0], ncols_res_cb);
+      memcpy(&ymm[1], mat + irows.m256i_u64[1], ncols_res_cb);
+      memcpy(&ymm[2], mat + irows.m256i_u64[2], ncols_res_cb);
+      memcpy(&ymm[3], mat + irows.m256i_u64[3], ncols_res_cb);
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      for (ptrdiff_t k = 0; k < ncols_r4; ++k)
+        _mm256_storeu_pd(mat_res + bidx.m256i_u64[k], ymm[k]);
+    }
+
+    irows = _mm256_add_epi64(irows, irows_inc4row);
+  }
+
+  if (nrows_r4) {
+    bidx = _mm256_add_epi64(bidx_base, _mm256_set1_epi64x(i));
+    for (j = 0; j < ncols_f4; j += 4) {
+      for (ptrdiff_t k = 0; k < nrows_r4; ++k) {
+        ymm[k] = _mm256_loadu_pd(mat + irows.m256i_u64[k]);
+      }
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      memcpy(mat_res + bidx.m256i_u64[0], &ymm[0], nrows_res_cb);
+      memcpy(mat_res + bidx.m256i_u64[1], &ymm[1], nrows_res_cb);
+      memcpy(mat_res + bidx.m256i_u64[2], &ymm[2], nrows_res_cb);
+      memcpy(mat_res + bidx.m256i_u64[3], &ymm[3], nrows_res_cb);
+      bidx = _mm256_add_epi64(bidx, bidx_inc4);
+
+      irows = _mm256_add_epi64(irows, irows_inc4);
+    }
+
+    if (ncols_r4 > 0) {
+      for (ptrdiff_t k = 0; k < nrows_r4; ++k) {
+        memcpy(&ymm[k], mat + irows.m256i_u64[k], ncols_res_cb);
+      }
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      for (ptrdiff_t k = 0; k < ncols_r4; ++k)
+        memcpy(mat_res + bidx.m256i_u64[k], &ymm[k], nrows_res_cb);
+    }
+  }
+}
+
+static void __mat_transpose_avx2_4x4_impl2(
+  const double *mat,
+  size_t nrows,
+  size_t ncols,
+  double *mat_res
+) {
+  const size_t nrows_f4 = nrows & ~3;
+  const size_t nrows_r4 = nrows & 3;
+  const size_t nrows_res_cb = nrows_r4 * sizeof(double);
+  const size_t ncols_f4 = ncols & ~3;
+  const size_t ncols_r4 = ncols & 3;
+  const size_t ncols_res_cb = ncols_r4 * sizeof(double);
+  ptrdiff_t i, j;
+
+  __m256d ymm[4];
+  __m256d ymm4;
+
+#define _LL_DOUBLE_PTR(m, index) (double *)m.m256i_u64[index]
+#define _LL_DOUBLE_CPTR(m, index) (const double *)m.m256i_u64[index]
+
+  __m256i mat_v = _mm256_set_epi64x((long long)(mat + 3*ncols), (long long)(mat + 2*ncols),
+    (long long)(mat + ncols), (long long)mat);
+  __m256i mat_res_v_base = _mm256_set_epi64x((long long)(mat_res + 3 * nrows), (long long)(mat_res + 2 * nrows),
+                                             (long long)(mat_res + nrows), (long long)mat_res);
+  __m256i mat_res_v;
+  __m256i mat_v_offset4 = _mm256_set1_epi64x(32);
+  __m256i mat_v_offset4row = _mm256_set1_epi64x(8*(3 * ncols + ncols_r4));
+  __m256i mat_res_v_offset4row = _mm256_set1_epi64x(32 * nrows);
+
+  for (i = 0; i < nrows_f4; i += 4) {
+    mat_res_v = _mm256_add_epi64(mat_res_v_base, _mm256_set1_epi64x(i << 3));
+    for (j = 0; j < ncols_f4; j += 4) {
+      ymm[0] = _mm256_loadu_pd(_LL_DOUBLE_CPTR(mat_v, 0));
+      ymm[1] = _mm256_loadu_pd(_LL_DOUBLE_CPTR(mat_v, 1));
+      ymm[2] = _mm256_loadu_pd(_LL_DOUBLE_CPTR(mat_v, 2));
+      ymm[3] = _mm256_loadu_pd(_LL_DOUBLE_CPTR(mat_v, 3));
+      mat_v = _mm256_add_epi64(mat_v, mat_v_offset4);
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      _mm256_storeu_pd(_LL_DOUBLE_PTR(mat_res_v, 0), ymm[0]);
+      _mm256_storeu_pd(_LL_DOUBLE_PTR(mat_res_v, 1), ymm[1]);
+      _mm256_storeu_pd(_LL_DOUBLE_PTR(mat_res_v, 2), ymm[2]);
+      _mm256_storeu_pd(_LL_DOUBLE_PTR(mat_res_v, 3), ymm[3]);
+      mat_res_v = _mm256_add_epi64(mat_res_v, mat_res_v_offset4row);
+    }
+
+    if (ncols_r4 > 0) {
+      memcpy(&ymm[0], _LL_DOUBLE_CPTR(mat_v, 0), ncols_res_cb);
+      memcpy(&ymm[1], _LL_DOUBLE_CPTR(mat_v, 1), ncols_res_cb);
+      memcpy(&ymm[2], _LL_DOUBLE_CPTR(mat_v, 2), ncols_res_cb);
+      memcpy(&ymm[3], _LL_DOUBLE_CPTR(mat_v, 3), ncols_res_cb);
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      for (ptrdiff_t k = 0; k < ncols_r4; ++k)
+        _mm256_storeu_pd(_LL_DOUBLE_PTR(mat_res_v, k), ymm[k]);
+    }
+
+    mat_v = _mm256_add_epi64(mat_v, mat_v_offset4row);
+  }
+
+  if (nrows_r4) {
+    mat_res_v = _mm256_add_epi64(mat_res_v_base, _mm256_set1_epi64x(i << 3));
+    for (j = 0; j < ncols_f4; j += 4) {
+      for (ptrdiff_t k = 0; k < nrows_r4; ++k) {
+        ymm[k] = _mm256_loadu_pd(_LL_DOUBLE_CPTR(mat_v, k));
+      }
+      mat_v = _mm256_add_epi64(mat_v, mat_v_offset4);
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      memcpy(_LL_DOUBLE_PTR(mat_res_v, 0), &ymm[0], nrows_res_cb);
+      memcpy(_LL_DOUBLE_PTR(mat_res_v, 1), &ymm[1], nrows_res_cb);
+      memcpy(_LL_DOUBLE_PTR(mat_res_v, 2), &ymm[2], nrows_res_cb);
+      memcpy(_LL_DOUBLE_PTR(mat_res_v, 3), &ymm[3], nrows_res_cb);
+      mat_res_v = _mm256_add_epi64(mat_res_v, mat_res_v_offset4row);
+    }
+
+    if (ncols_r4 > 0) {
+      for (ptrdiff_t k = 0; k < nrows_r4; ++k) {
+        memcpy(&ymm[k], _LL_DOUBLE_CPTR(mat_v, k), ncols_res_cb);
+      }
+
+      __AVX2_MAT4X4_TRANSPOSE(ymm, ymm4)
+
+      for (ptrdiff_t k = 0; k < ncols_r4; ++k)
+        memcpy(_LL_DOUBLE_PTR(mat_res_v, k), &ymm[k], nrows_res_cb);
+    }
+  }
+
+#undef _LL_DOUBLE_PTR
+#undef _LL_DOUBLE_CPTR
+}
+
+template<size_t ...I, typename = std::enable_if_t<sizeof...(I) <= 16>>
+static void __mxm_avx2_unroll_impl(
   const double *mat1,
   const double *mat2,
   size_t M,
   size_t K,
   size_t N,
-  const double *mat_res
+  double *mat_res,
+  const double *aux_res_row_buffers,
+  std::index_sequence<I...>
 ) {
-
-  size_t M_f4 = M & ~3;
-  size_t M_r4 = M & 3;
+  constexpr size_t UnrollRowSize = sizeof...(I);
+  size_t M_r4 = M % UnrollRowSize;
+  size_t M_f4 = M - M_r4;
   size_t K_f4 = K & ~3;
   size_t K_r4 = K & 3;
+  size_t K_r4_cb = K_r4 * sizeof(double);
   size_t N_f4 = N & ~3;
   size_t N_r4 = N & 3;
+  size_t N_r4_cb = N_r4 * sizeof(double);
+  size_t N_cpd4 = (N + 3) >> 2;
+  ptrdiff_t i, j, jj, k, k_pd4;
+  size_t mat1_v_inc = UnrollRowSize * K;
+  size_t mat_res_v_inc = UnrollRowSize * N;
 
-  const double *a0 = mat1,
-               *b0 = mat1 + K,
-               *c0 = mat1 + 2*K,
-               *d0 = mat1 + 3*K;
-  const double *a1 = mat2,
-               *b1 = mat2 + N,
-               *c1 = mat2 + 2*N,
-               *d1 = mat2 + 2*N;
+  const double *mat1_v[UnrollRowSize];
+  const double *mat2_v;
+  double *mat_res_v[UnrollRowSize];
 
-  __m256d ymmN[4], ymmM[4];
-  __AVX2_ALIGNED double m_dup[4][4][4];
-  __m256d ymm8, ymm9, ymm10, ymm11;
+  const __m256d ymm_zero = _mm256_setzero_pd();
+  __m256d ymm1[UnrollRowSize];
+  __m256d ymm2;
 
-  for(ptrdiff_t i = 0; i < M_f4; i += 4) {
-    ymmM[0] = _mm256_loadu_pd(a0);
-    ymmM[1] = _mm256_loadu_pd(b0);
-    ymmM[2] = _mm256_loadu_pd(c0);
-    ymmM[3] = _mm256_loadu_pd(d0);
+  __AVX2_ALIGNED double mat1_block[UnrollRowSize][4];
 
+  __m256d *ymm_res[UnrollRowSize];
 
-    for(ptrdiff_t j = 0; j < K_f4; j += 4) {
-      ymmN[0] = _mm256_loadu_pd(a1);
-      ymmN[1] = _mm256_loadu_pd(b1);
-      ymmN[2] = _mm256_loadu_pd(c1);
-      ymmN[3] = _mm256_loadu_pd(d1);
+  if(aux_res_row_buffers)
+    ymm_res[0] = (__m256d *)aux_res_row_buffers;
+  else
+    ymm_res[0] = (__m256d *)_aligned_malloc(N_cpd4 * 32 * UnrollRowSize, 32);
 
+  ((ymm_res[I] = ymm_res[0] + I * N_cpd4),...);
+
+  ((mat1_v[I] = mat1 + I*K),...);
+  ((mat_res_v[I] = mat_res + I*N),...);
+
+  for(i = 0; i < M_f4; i += UnrollRowSize) {
+    for(j = 0; j < N_cpd4; ++j) {
+      ((ymm_res[I][j] = ymm_zero),...);
     }
+
+    mat2_v = mat2;
+    for(j = 0; j < K_f4; j += 4) {
+      ((*(__m256d *)(mat1_block[I]) = _mm256_loadu_pd(mat1_v[I] + j)),...);
+
+      for(jj = 0; jj < 4; ++jj) {
+
+        ((ymm1[I] = _mm256_broadcast_sd(mat1_block[I] + jj)),...);
+
+        for(k = 0, k_pd4 = 0; k < N_f4; k += 4, k_pd4 += 1) {
+          ymm2 = _mm256_loadu_pd(mat2_v + k);
+          ((ymm_res[I][k_pd4] = _mm256_fmadd_pd(ymm1[I], ymm2, ymm_res[I][k_pd4])), ...);
+        }
+
+        if(N_r4) {
+          memcpy(&ymm2, mat2_v + k, N_r4_cb);
+          ((ymm_res[I][k_pd4] = _mm256_fmadd_pd(ymm1[I], ymm2, ymm_res[I][k_pd4])), ...);
+        }
+
+        mat2_v += N;
+      }
+    }
+
+    if(K_r4) {
+      ((memcpy(mat1_block[I], mat1_v[I] + j, K_r4_cb)),...);
+
+      for (jj = 0; jj < K_r4; ++jj) {
+
+        ((ymm1[I] = _mm256_broadcast_sd(mat1_block[I] + jj)),...);
+
+        for(k = 0, k_pd4 = 0; k < N_f4; k += 4, k_pd4 += 1) {
+          ymm2 = _mm256_loadu_pd(mat2_v + k);
+          ((ymm_res[I][k_pd4] = _mm256_fmadd_pd(ymm1[I], ymm2, ymm_res[I][k_pd4])), ...);
+        }
+
+        if(N_r4) {
+          memcpy(&ymm2, mat2_v + k, N_r4_cb);
+          ((ymm_res[I][k_pd4] = _mm256_fmadd_pd(ymm1[I], ymm2, ymm_res[I][k_pd4])), ...);
+        }
+
+        mat2_v += N;
+      }
+    }
+
+    for(k = 0, k_pd4 = 0; k < N_f4; k += 4, k_pd4 += 1) {
+      ((_mm256_storeu_pd(mat_res_v[I] + k, ymm_res[I][k_pd4])), ...);
+    }
+
+    if(N_r4)
+      ((memcpy(mat_res_v[I] + k, ymm_res[I] + k_pd4, N_r4_cb)), ...);
+
+    ((mat1_v[I] += mat1_v_inc),...);
+    ((mat_res_v[I] += mat_res_v_inc),...);
   }
 
+  if(M_r4) {
+    mat1 = mat1_v[0];
+    mat_res = mat_res_v[0];
+    M = M_r4;
+
+    if(M_r4 >= 8)
+      __mxm_avx2_unroll_impl(mat1, mat2, M, K, N, mat_res, (double *)ymm_res[0], std::make_index_sequence<8>());
+    else if(M_r4 >= 4)
+      __mxm_avx2_unroll_impl(mat1, mat2, M, K, N, mat_res, (double *)ymm_res[0], std::make_index_sequence<4>());
+    else if(M_r4 >= 2)
+      __mxm_avx2_unroll_impl(mat1, mat2, M, K, N, mat_res, (double *)ymm_res[0], std::make_index_sequence<2>());
+    else if(M_r4)
+      __mxm_avx2_unroll_impl(mat1, mat2, M, K, N, mat_res, (double *)ymm_res[0], std::make_index_sequence<1>());
+  }
+
+  if(!aux_res_row_buffers)
+    _aligned_free(ymm_res[0]);
 }
 
 template<size_t ...I>
@@ -360,57 +621,115 @@ static void __mxv_avx2_fma_unroll_impl(
 ) {
   constexpr size_t BX = sizeof...(I);
   const size_t nrows_f = (nrows / BX) * BX;
-  const size_t ncols_f = RoundF(ncols, 4 );
-  const size_t ncols_res_cb = (ncols - ncols_f) * sizeof(double);
-  ptrdiff_t i = 0;
+  const size_t ncols_f = ncols & ~3;
+  const size_t ncols_res_cb = (ncols & 3) * sizeof(double);
+  const size_t mat_v_offset4row = BX * row_pitch;
+  ptrdiff_t i, j;
 
-  for (; i < nrows_f; i += BX) {
+  const double *mat_v[BX];
+  const __m256d ymm_zero = _mm256_setzero_pd();
+  __m256d re[BX], mat_res_buff, mv, vec_res_buff;
 
-    __m256d re[BX] = { _mm256_setzero_pd() };
+  ((mat_v[I] = mat + I * row_pitch),...);
 
-    for(ptrdiff_t j = 0; j < ncols_f; j += 4) {
+  if(((uintptr_t)vec & 32)) {
+    for (i = 0; i < nrows_f; i += BX) {
 
-      __m256d mv = _mm256_loadu_pd(vec + j);
+      ((re[I] = ymm_zero),...);
 
-      ((re[I] = _mm256_fmadd_pd(_mm256_loadu_pd(mat + (i + I) * row_pitch + j), mv, re[I])), ...);
-    }
-    __m256d mat_res_buff = _mm256_setzero_pd();
-    __m256d vec_res_buff = _mm256_setzero_pd();
-    memcpy(&vec_res_buff, vec + ncols_f, ncols_res_cb);
+      for(j = 0; j < ncols_f; j += 4) {
+        mv = _mm256_loadu_pd(vec + j);
+        ((re[I] = _mm256_fmadd_pd(_mm256_loadu_pd(mat_v[I] + j), mv, re[I])), ...);
+      }
 
-    if(ncols_res_cb != 0) {
-      ((memcpy(&mat_res_buff, mat + (i + I) * row_pitch + ncols_f, ncols_res_cb),
-        re[I] = _mm256_fmadd_pd(mat_res_buff, vec_res_buff, re[I])),
+      if(ncols_res_cb != 0) {
+        vec_res_buff = ymm_zero;
+        mat_res_buff = ymm_zero;
+        memcpy(&vec_res_buff, vec + j, ncols_res_cb);
+        ((memcpy(&mat_res_buff, mat_v[I] + j, ncols_res_cb),
+          re[I] = _mm256_fmadd_pd(mat_res_buff, vec_res_buff, re[I])),
+        ...);
+      }
+
+      ((re[I] = _mm256_hadd_pd(re[I], re[I]), re[I] = _mm256_permute4x64_pd(re[I], 0b00001000),
+        re[I] = _mm256_hadd_pd(re[I], re[I]), res[i + I] = re[I].m256d_f64[0]),
       ...);
+
+      ((mat_v[I] += mat_v_offset4row), ...);
     }
 
-    ((re[I] = _mm256_hadd_pd(re[I], re[I]), re[I] = _mm256_permute4x64_pd(re[I], 0b00001000),
-      re[I] = _mm256_hadd_pd(re[I], re[I]), res[i + I] = re[I].m256d_f64[0]),
-     ...);
-  }
+    for (; i < nrows; ++i) {
 
-  for (; i < nrows; ++i) {
+      re[0] = ymm_zero;
 
-    __m256d re = _mm256_setzero_pd();
+      for (j = 0; j < ncols_f; j += 4) {
+        mv = _mm256_loadu_pd(vec + j);
+        re[0] = _mm256_fmadd_pd(_mm256_loadu_pd(mat_v[0] + j), mv, re[0]);
+      }
+      if(ncols_res_cb != 0) {
+        vec_res_buff = ymm_zero;
+        mat_res_buff = ymm_zero;
+        memcpy(&vec_res_buff, vec + j, ncols_res_cb);
+        memcpy(&mat_res_buff, mat_v[0] + j, ncols_res_cb);
+        re[0] = _mm256_fmadd_pd(mat_res_buff, vec_res_buff, re[0]);
+      }
 
-    for (ptrdiff_t j = 0; j < ncols_f; j += 4) {
+      re[0] = _mm256_hadd_pd(re[0], re[0]);
+      re[0] = _mm256_permute4x64_pd(re[0], 0b00001000);
+      re[0] = _mm256_hadd_pd(re[0], re[0]);
+      res[i] = re[0].m256d_f64[0];
 
-      __m256d mv = _mm256_loadu_pd(vec + j);
-
-      re = _mm256_fmadd_pd(_mm256_loadu_pd(mat + i * row_pitch + j), mv, re);
+      mat_v[0] += row_pitch;
     }
-    if(ncols_res_cb != 0) {
-      __m256d mat_res_buff = _mm256_setzero_pd();
-      __m256d vec_res_buff = _mm256_setzero_pd();
-      memcpy(&vec_res_buff, vec + ncols_f, ncols_res_cb);
-      memcpy(&mat_res_buff, mat + i * row_pitch + ncols_f, ncols_res_cb);
-      re = _mm256_fmadd_pd(mat_res_buff, vec_res_buff, re);
+  } else {
+    for (i = 0; i < nrows_f; i += BX) {
+
+      ((re[I] = ymm_zero), ...);
+
+      for (j = 0; j < ncols_f; j += 4) {
+        mv = _mm256_load_pd(vec + j);
+        ((re[I] = _mm256_fmadd_pd(_mm256_loadu_pd(mat_v[I] + j), mv, re[I])), ...);
+      }
+
+      if (ncols_res_cb != 0) {
+        vec_res_buff = ymm_zero;
+        mat_res_buff = ymm_zero;
+        memcpy(&vec_res_buff, vec + j, ncols_res_cb);
+        ((memcpy(&mat_res_buff, mat_v[I] + j, ncols_res_cb),
+          re[I] = _mm256_fmadd_pd(mat_res_buff, vec_res_buff, re[I])),
+         ...);
+      }
+
+      ((re[I] = _mm256_hadd_pd(re[I], re[I]), re[I] = _mm256_permute4x64_pd(re[I], 0b00001000),
+        re[I] = _mm256_hadd_pd(re[I], re[I]), res[i + I] = re[I].m256d_f64[0]),
+       ...);
+
+      ((mat_v[I] += mat_v_offset4row), ...);
     }
 
-    re = _mm256_hadd_pd(re, re);
-    re = _mm256_permute4x64_pd(re, 0b00001000);
-    re = _mm256_hadd_pd(re, re);
-    res[i] = re.m256d_f64[0];
+    for (; i < nrows; ++i) {
+
+      re[0] = ymm_zero;
+
+      for (j = 0; j < ncols_f; j += 4) {
+        mv = _mm256_load_pd(vec + j);
+        re[0] = _mm256_fmadd_pd(_mm256_loadu_pd(mat_v[0] + j), mv, re[0]);
+      }
+      if (ncols_res_cb != 0) {
+        vec_res_buff = ymm_zero;
+        mat_res_buff = ymm_zero;
+        memcpy(&vec_res_buff, vec + j, ncols_res_cb);
+        memcpy(&mat_res_buff, mat_v[0] + j, ncols_res_cb);
+        re[0] = _mm256_fmadd_pd(mat_res_buff, vec_res_buff, re[0]);
+      }
+
+      re[0] = _mm256_hadd_pd(re[0], re[0]);
+      re[0] = _mm256_permute4x64_pd(re[0], 0b00001000);
+      re[0] = _mm256_hadd_pd(re[0], re[0]);
+      res[i] = re[0].m256d_f64[0];
+
+      mat_v[0] += row_pitch;
+    }
   }
 }
 
@@ -426,17 +745,38 @@ void mxv_avx2_fma_unroll(
   return __mxv_avx2_fma_unroll_impl(mat, vec, nrows, ncols, row_pitch, res, std::make_index_sequence<BX>{});
 }
 
-void mat_transpose_avx2_unroll(
+void mat_transpose_avx2_4x8_unroll(
   const double *mat,
   size_t nrows,
   size_t ncols,
   double *mat_res
 ) {
-  return __mat_transpose_avx2_impl(mat,nrows, ncols, mat_res);
+  return __mat_transpose_avx2_4x8_impl(mat,nrows, ncols, mat_res);
+}
+
+void mat_transpose_avx2_4x4_unroll(const double *mat, size_t nrows, size_t ncols, double *mat_res) {
+  return __mat_transpose_avx2_4x4_impl(mat, nrows, ncols, mat_res);
+}
+
+void mat_transpose_avx2_4x4_unroll2(const double *mat, size_t nrows, size_t ncols, double *mat_res) {
+  return __mat_transpose_avx2_4x4_impl2(mat, nrows, ncols, mat_res);
+}
+
+template<size_t UnrollRowSize>
+void mxm_avx2_unroll(
+  const double *mat1,
+  const double *mat2,
+  size_t M,
+  size_t K,
+  size_t N,
+  double *mat_res
+) {
+  return __mxm_avx2_unroll_impl(mat1, mat2, M, K, N, mat_res, nullptr, std::make_index_sequence<UnrollRowSize>());
 }
 
 static ycl_program g_pMatrixProgram;
 static ycl_program g_pMatMulVecProgram;
+
 
 CLHRESULT TestMatrixTransposeProfile(
     cl_context context, cl_device_id device, cl_command_queue cmd_queue, size_t ncols, size_t nrows) {
@@ -473,15 +813,29 @@ CLHRESULT TestMatrixTransposeProfile(
     }
   }
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Transpose matrix(CPU seiralizing) elapsed:                         %.3fms\n", elapsed.count());
 
   std::vector<double> test_mat3(test_mat.size());
   start = hp_timer::now();
-  mat_transpose_avx2_unroll(test_mat.data(), nrows, ncols, (double *)test_mat3.data());
+  mat_transpose_avx2_4x8_unroll(test_mat.data(), nrows, ncols, (double *)test_mat3.data());
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Transpose matrix(CPU AVX2 blocking 4x8) elapsed:                   %.3fms\n", elapsed.count());
+  printf("results coincidence: %s\n", check_matrix_equiv(test_mat3, test_mat2, 1.0E-6, nrows, ncols) ? "true" : "false");
+
+  start = hp_timer::now();
+  mat_transpose_avx2_4x4_unroll(test_mat.data(), nrows, ncols, (double *)test_mat3.data());
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("Transpose matrix(CPU AVX2 blocking 4x4 implementation 1) elapsed:  %.3fms\n", elapsed.count());
+  printf("results coincidence: %s\n", check_matrix_equiv(test_mat3, test_mat2, 1.0E-6, nrows, ncols) ? "true" : "false");
+
+  start = hp_timer::now();
+  mat_transpose_avx2_4x4_unroll2(test_mat.data(), nrows, ncols, (double *)test_mat3.data());
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("Transpose matrix(CPU AVX2 blocking 4x4 implementation 2) elapsed:  %.3fms\n", elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(test_mat3, test_mat2, 1.0E-6, nrows, ncols) ? "true" : "false");
 
   ycl_kernel ker;
@@ -510,7 +864,7 @@ CLHRESULT TestMatrixTransposeProfile(
   V_RETURN(clFlush(cmd_queue));
   V_RETURN(clWaitForEvents(1, &rd_done_ev));
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Transpose matrix(Use only global storage) elapsed:                 %.3fms\n", elapsed.count());
   printf("results coincidence: %s\n",  check_matrix_equiv(test_mat, test_mat2, 1.0E-6, nrows, ncols) ? "true" : "false");
 
@@ -529,7 +883,7 @@ CLHRESULT TestMatrixTransposeProfile(
   V_RETURN(clFlush(cmd_queue));
   V_RETURN(clWaitForEvents(1, &rd_done_ev));
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Transpose matrix(Use shared local storage, 64bits bank) elapsed:   %.3fms\n", elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(test_mat, test_mat2, 1.0E-6, nrows, ncols) ? "true" : "false");
 
@@ -547,13 +901,12 @@ CLHRESULT TestMatrixTransposeProfile(
   V_RETURN(clFlush(cmd_queue));
   V_RETURN(clWaitForEvents(1, &rd_done_ev));
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Transpose matrix(Eliminate bank conflict, 32bits bank) elapsed:    %.3fms\n", elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(test_mat, test_mat2, 1.0E-6, nrows, ncols) ? "true" : "false");
 
   return hr;
 }
-
 
 CLHRESULT TestMatrixMulitplicationProfile(
   cl_context context, cl_device_id device, cl_command_queue cmd_queue, size_t M, size_t K, size_t N) {
@@ -594,8 +947,29 @@ CLHRESULT TestMatrixMulitplicationProfile(
     }
   }
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Matrix multiplication(CPU serializing) elapsed:                    %.3fms\n", elapsed.count());
+
+  start = hp_timer::now();
+  mxm_avx2_unroll<16>(a_data.data(), b_data.data(), M, K, N, (double *)c_data2.data());
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("Matrix multiplication(CPU AVX2+FMA Unroll 16 rows) elapsed:        %.3fms\n", elapsed.count());
+  printf("Results coincedence: %s\n", check_matrix_equiv(c_data2, c_data, 1.0E-6, N, M) ? "true" : "false");
+
+  start = hp_timer::now();
+  mxm_avx2_unroll<8>(a_data.data(), b_data.data(), M, K, N, (double *)c_data2.data());
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("Matrix multiplication(CPU AVX2+FMA Unroll 8 rows) elapsed:         %.3fms\n", elapsed.count());
+  printf("Results coincedence: %s\n", check_matrix_equiv(c_data2, c_data, 1.0E-6, N, M) ? "true" : "false");
+
+  start = hp_timer::now();
+  mxm_avx2_unroll<4>(a_data.data(), b_data.data(), M, K, N, (double *)c_data2.data());
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("Matrix multiplication(CPU AVX2+FMA Unroll 4 rows) elapsed:         %.3fms\n", elapsed.count());
+  printf("Results coincedence: %s\n", check_matrix_equiv(c_data2, c_data, 1.0E-6, N, M) ? "true" : "false");
 
   V_RETURN((a_buffer <<= clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_HOST_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                                         a_buffer_size, a_data.data(), &hr),
@@ -636,7 +1010,7 @@ CLHRESULT TestMatrixMulitplicationProfile(
   V_RETURN(clWaitForEvents(1, &rd_done_ev));
 
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Matrix multiplication(Use global storage only) elapsed:            %.3fms\n",elapsed.count());
   printf("Results coincedence: %s\n", check_matrix_equiv(c_data2, c_data, 1.0E-6, N, M) ? "true" : "false");
 
@@ -654,7 +1028,7 @@ CLHRESULT TestMatrixMulitplicationProfile(
   V_RETURN(clWaitForEvents(1, &rd_done_ev));
 
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
+  elapsed = fmilliseconds_cast(fin - start);
   printf("Matrix multiplication(Use shared local storage) elapsed:           %.3fms\n", elapsed.count());
   printf("Results coincedence: %s\n", check_matrix_equiv(c_data2, c_data, 1.0E-6, N, M) ? "true" : "false");
 
@@ -689,35 +1063,36 @@ CLHRESULT TestMatMulVecProfile(
     res_data2[i] = temp;
   }
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU) elapsed: %.3fms\n", mat_rows, mat_cols, mat_cols, elapsed.count());
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU) elapsed:                            %.3fms\n",
+         mat_rows, mat_cols, mat_cols, elapsed.count());
 
   std::vector<double> res_data(mat_rows);
 
   start = hp_timer::now();
   mxv_avx2_fma_unroll<3>(mat_data.data(), vec_data.data(), mat_rows, mat_cols, mat_pitch, (double *)res_data.data());
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 3 rows) elapsed: %.3fms\n",
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 3 rows) elapsed:   %.3fms\n",
          mat_rows, mat_cols, mat_cols, elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(res_data, res_data2, 1.0E-6, mat_rows, 1) ? "true" : "false");
   start = hp_timer::now();
   mxv_avx2_fma_unroll<4>(mat_data.data(), vec_data.data(), mat_rows, mat_cols, mat_pitch, (double *)res_data2.data());
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 4 rows) elapsed: %.3fms\n",
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 4 rows) elapsed:   %.3fms\n",
          mat_rows, mat_cols, mat_cols, elapsed.count());
   start = hp_timer::now();
   mxv_avx2_fma_unroll<5>(mat_data.data(), vec_data.data(), mat_rows, mat_cols, mat_pitch, (double *)res_data2.data());
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 5 rows) elapsed: %.3fms\n",
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 5 rows) elapsed:   %.3fms\n",
          mat_rows, mat_cols, mat_cols, elapsed.count());
   start = hp_timer::now();
   mxv_avx2_fma_unroll<7>(mat_data.data(), vec_data.data(), mat_rows, mat_cols, mat_pitch, (double *)res_data2.data());
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 7 rows) elapsed: %.3fms\n", mat_rows,
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (CPU, AVX2+FMA, unroll 7 rows) elapsed:   %.3fms\n", mat_rows,
          mat_cols, mat_cols, elapsed.count());
 
   ycl_buffer mat_buffer, vec_buffer, res_buffer;
@@ -761,8 +1136,8 @@ CLHRESULT TestMatMulVecProfile(
   V_RETURN(clFlush(cmd_queue));
   V_RETURN(clWaitForEvents(1, &done_ev));
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (One Row Per Block) elaped: %.3fms\n", mat_rows, mat_cols, mat_cols,
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (One Row Per Block) elaped:               %.3fms\n", mat_rows, mat_cols, mat_cols,
     elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(res_data, res_data2, 1.0E-6, mat_rows, 1) ? "true" : "false");
 
@@ -784,8 +1159,8 @@ CLHRESULT TestMatMulVecProfile(
   V_RETURN(clFlush(cmd_queue));
   V_RETURN(clWaitForEvents(1, &done_ev));
   fin = hp_timer::now();
-  elapsed = std::chrono::duration_cast<fmilliseconds>(fin - start);
-  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (One Raw Per Warp) elapsed: %.3fms\n", mat_rows, mat_cols,
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("matrix [%lld x %lld] multipling vector [%lld x 1]  (One Raw Per Warp) elapsed:               %.3fms\n", mat_rows, mat_cols,
          mat_cols, elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(res_data, res_data2, 1.0E-6, mat_rows, 1) ? "true" : "false");
 
@@ -795,20 +1170,18 @@ CLHRESULT TestMatMulVecProfile(
 int main() {
 
   CLHRESULT hr;
-  const char *preferred_plats[] = {"NVIDIA CUDA", "AMD", nullptr};
   cl_platform_id platform;
   ycl_device_id device;
   ycl_context context;
   ycl_command_queue cmd_queue;
 
-  V_RETURN(FindOpenCLPlatform(preferred_plats, CL_DEVICE_TYPE_GPU, &platform));
-  V_RETURN(CreateDeviceContext(platform, CL_DEVICE_TYPE_GPU,  &device, &context));
+  V_RETURN(FindOpenCLPlatform(CL_DEVICE_TYPE_GPU, {"NVIDIA CUDA", "AMD"}, {}, &platform, &device));
+  V_RETURN(CreateDeviceContext(platform, device, &context));
   V_RETURN(CreateCommandQueue(context, device, &cmd_queue));
 
   V_RETURN(CreateProgramFromFile(context, device, "#define _USE_DOUBLE_FP", "matrix.cl", &g_pMatrixProgram));
 
   std::uniform_int_distribution<size_t> transpose_ncols_nrows_distr(16, 5000);
-  std::uniform_int_distribution<size_t> mul_ncols_nrows_distr(510, 2000);
 
   for(ptrdiff_t i = 0; i < 100; ++i) {
     printf("Matrix Transpose Profile [%lld]:\n", i);
@@ -817,29 +1190,32 @@ int main() {
     printf("\n");
   }
 
-  for(ptrdiff_t i = 0; i < 20; ++i) {
-    printf("Matrix Multiplication Profile [%lld]:\n", i);
-    TestMatrixMulitplicationProfile(context, device, cmd_queue, mul_ncols_nrows_distr(g_RandomEngine),
-                                    mul_ncols_nrows_distr(g_RandomEngine), mul_ncols_nrows_distr(g_RandomEngine));
-    printf("\n");
-  }
+  // std::uniform_int_distribution<size_t> mul_ncols_nrows_distr(510, 2000);
 
-  V_RETURN(CreateProgramFromFile(context, device, "#define _USE_DOUBLE_FP", "mat_mul_vec.cl", &g_pMatMulVecProgram));
+  // for(ptrdiff_t i = 0; i < 20; ++i) {
+  //   printf("Matrix Multiplication Profile [%lld]:\n", i);
+  //   TestMatrixMulitplicationProfile(context, device, cmd_queue, mul_ncols_nrows_distr(g_RandomEngine),
+  //                                   mul_ncols_nrows_distr(g_RandomEngine), mul_ncols_nrows_distr(g_RandomEngine));
+  //   printf("\n");
+  // }
 
-  std::uniform_int_distribution<size_t> mxv_ncols_distr(mul_ncols_nrows_distr.a(), mul_ncols_nrows_distr.b() >> 1);
+  // V_RETURN(CreateProgramFromFile(context, device, "#define _USE_DOUBLE_FP", "mat_mul_vec.cl", &g_pMatMulVecProgram));
 
-  size_t mat_rows = mul_ncols_nrows_distr(g_RandomEngine);
-  size_t mat_cols = mxv_ncols_distr(g_RandomEngine);
-  size_t mat_pitch = mxv_ncols_distr(g_RandomEngine);
+  // std::uniform_int_distribution<size_t> mxv_ncols_distr(510, 5000);
 
-  for(ptrdiff_t i = 0; i < 20; ++i) {
-    printf("Matrix-Vector Multiplication Profile [%lld]:\n", i);
-    if(mat_cols > mat_pitch)
-      std::swap(mat_cols, mat_pitch);
+  // for(ptrdiff_t i = 0; i < 40; ++i) {
 
-    TestMatMulVecProfile(context, device, cmd_queue, mat_rows, mat_cols, mat_pitch);
-    printf("\n");
-  }
+  //   size_t mat_rows = mxv_ncols_distr(g_RandomEngine);
+  //   size_t mat_cols = mxv_ncols_distr(g_RandomEngine);
+  //   size_t mat_pitch = mxv_ncols_distr(g_RandomEngine);
+
+  //   printf("Matrix-Vector Multiplication Profile [%lld]:\n", i);
+  //   if(mat_cols > mat_pitch)
+  //     std::swap(mat_cols, mat_pitch);
+
+  //   TestMatMulVecProfile(context, device, cmd_queue, mat_rows, mat_cols, mat_pitch);
+  //   printf("\n");
+  // }
 
   return hr;
 }

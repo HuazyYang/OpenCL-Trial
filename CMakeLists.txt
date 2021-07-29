@@ -10,6 +10,10 @@ if(NOT CMAKE_BUILD_TYPE OR NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 if(CMAKE_BUILD_TYPE)
+  set(TOUPPER "${CMAKE_BUILD_TYPE}" MY_CXX_BUILD_TYPE_EXT)
+  set(TOUPPER "_${CMAKE_BUILD_TYPE}" MY_C_BUILD_TYPE_EXT)
+  add_compile_definitions(${MY_C_BUILD_TYPE_EXT} ${MY_CXX_BUILD_TYPE_EXT})
+
   set(TRIAL_OUTDIR_END_SUFFIX ${CMAKE_BUILD_TYPE})
   set(TRIAL_OUTDIR_SUFFIX ${TRIAL_OUTDIR_END_SUFFIX})
 else()
@@ -22,9 +26,24 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(COMMON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
+SET(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 
-include_directories("$ENV{INTELOCLSDKROOT}/include")
-include_directories(${COMMON_INCLUDE_DIR})
+include_directories(
+  "$ENV{INTELOCLSDKROOT}/include"
+  ${COMMON_INCLUDE_DIR}
+)
+
+# OpenGL staff
+SET(GLAD_SOURCE_DIR ${THIRD_PARTY_DIR}/glad-460-core/src/)  # OpenGL staff
+include_directories(${THIRD_PARTY_DIR}/glad-460-core/include)
+
+# GLM staff
+include_directories(${THIRD_PARTY_DIR}/glm)
+
+# GLFW staff
+add_subdirectory(${THIRD_PARTY_DIR}/glfw ${CMAKE_CURRENT_BINARY_DIR}/glfw)
+include_directories(${THIRD_PARTY_DIR}/glfw/include)
+link_directories(${CMAKE_CURRENT_BINARY_DIR}/glfw/src/${CMAKE_BUILD_TYPE})
 
 if(${CMAKE_GENERATOR_PLATFORM} STREQUAL "x86")
   link_directories("$ENV{INTELOCLSDKROOT}/lib/x86")
@@ -46,3 +65,5 @@ add_subdirectory(pixels_histogram)
 add_subdirectory(vector_dot)
 add_subdirectory(matrix)
 add_subdirectory(sparse_matrix)
+add_subdirectory(transpose_inplace)
+add_subdirectory(heat_transfer)

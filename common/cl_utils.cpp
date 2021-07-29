@@ -1,4 +1,5 @@
 #include "cl_utils.h"
+#include <CL/cl_gl_ext.h>
 #include <stdio.h>
 #include <stdarg.h>
 #ifdef _WIN32
@@ -104,6 +105,35 @@ void CLUtilsTrace(CLHRESULT hr, const char *fmt, ...) {
 }
 #endif
 
+CLHRESULT CheckCLExtensions(cl_device_id device, std::initializer_list<const char *> req_extensions) {
+  CLHRESULT hr;
+  size_t num_extensions;
+  std::vector<char> extensions;
+  size_t check_left = req_extensions.size();
+
+  V_RETURN(clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &num_extensions));
+  extensions.resize(num_extensions);
+  V_RETURN(clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, num_extensions, (void *)extensions.data(), nullptr));
+
+  char *token_ctx;
+  const char *ext;
+
+  ext = strtok_s((char *)extensions.data(), " ", &token_ctx);
+  while(ext) {
+    for(auto it_req = req_extensions.begin(); it_req != req_extensions.end(); ++it_req) {
+      if(_stricmp(*it_req, ext) == 0) {
+        --check_left;
+        break;
+      }
+    }
+    if(check_left == 0)
+      break;
+    ext = strtok_s(nullptr, " ", &token_ctx);
+  }
+
+  return check_left ? CL_INVALID_DEVICE : CL_SUCCESS;
+}
+
 static CLX_REFRET_T CL_API_CALL __clx_ref_no_op(void *) { return CL_SUCCESS; }
 
 CLX_OBJECT_REFCOUNT_MGR_TABLE_ENTRY g_CLxObjectRefcountMgrTable[(int)CLX_OBJECT_TYPE::CLX_OBJECT_TYPE_MAX] = {
@@ -120,30 +150,48 @@ CLX_OBJECT_REFCOUNT_MGR_TABLE_ENTRY g_CLxObjectRefcountMgrTable[(int)CLX_OBJECT_
     {(CLX_OBJECT_ADDREF)clRetainSampler, (CLX_OBJECT_RELEASE)clReleaseSampler},
 };
 
-CLHRESULT FindOpenCLPlatform(const char * const* preferred_plats, cl_device_type dev_type, cl_platform_id *plat_id) {
+CLHRESULT FindOpenCLPlatform(cl_device_type dev_type,
+                             std::initializer_list<const char *> preferred_plats,
+                             std::initializer_list<const char *> req_extensions,
+                             cl_platform_id *plat_id,
+                             cl_device_id *device) {
+  return FindOpenCLPlatform2(dev_type, preferred_plats, req_extensions, nullptr, nullptr, plat_id, device);
+}
 
+extern CLHRESULT FindOpenCLPlatform2(cl_device_type dev_type,
+                                     std::initializer_list<const char *> preferred_plats,
+                                     std::initializer_list<const char *> req_extensions,
+                                     void *glrc,      // Optional
+                                     void *glsurface, // Optional
+                                     cl_platform_id *plat_id,
+                                     cl_device_id *device) {
   CLHRESULT hr;
-  cl_uint numPlatform;
-  cl_platform_id plat_id2 = nullptr;
+  cl_uint num_plats;
+  cl_platform_id sel_platform;
+  cl_device_id sel_device;
 
-  V_RETURN(clGetPlatformIDs(0, nullptr, &numPlatform));
-  if (numPlatform == 0) {
+  V_RETURN(clGetPlatformIDs(0, nullptr, &num_plats));
+  if (num_plats == 0) {
     hr = -1;
     CL_TRACE(hr, "No Platform found!\n");
     return hr;
   }
 
-  std::vector<cl_platform_id> platforms{numPlatform};
+  std::vector<cl_platform_id> platforms{num_plats};
 
-  V_RETURN(clGetPlatformIDs(numPlatform, &platforms[0], nullptr));
+  V_RETURN(clGetPlatformIDs(num_plats, &platforms[0], nullptr));
 
-  if (preferred_plats != nullptr && preferred_plats[0]) {
+  size_t nlength;
+  std::vector<char> name;
+  size_t num_devs = 0;
+  std::vector<cl_device_id> devs;
+  bool preferred_name_matched;
+  clGetGLContextInfoKHR_fn clGetGLContextInfoKHR;
+  cl_device_type dev_type2;
 
-    size_t nlength;
-    std::vector<char> name;
-    cl_uint numDevices;
+  for (auto itPlat = platforms.begin(); itPlat != platforms.end(); ++itPlat) {
 
-    for (auto itPlat = platforms.begin(); itPlat != platforms.end(); ++itPlat) {
+    if(preferred_plats.size() != 0) {
 
       V_RETURN(clGetPlatformInfo(*itPlat, CL_PLATFORM_NAME, 0, nullptr, &nlength));
 
@@ -152,37 +200,77 @@ CLHRESULT FindOpenCLPlatform(const char * const* preferred_plats, cl_device_type
 
       V_RETURN(clGetPlatformInfo(*itPlat, CL_PLATFORM_NAME, nlength, &name[0], nullptr));
 
-      for(const char * const *plat = preferred_plats; plat != nullptr; ++plat) {
-        if(_strnicmp(name.data(), *plat, strlen(*plat)) == 0) {
-          V_RETURN(clGetDeviceIDs(*itPlat, dev_type, 0, nullptr, &numDevices));
-          if (numDevices == 0) {
-            hr = -1;
-            CL_TRACE(hr, "Error: Required device type does not exist on specified platform!\n");
-            return hr;
-          }
-          plat_id2 = *itPlat;
+      preferred_name_matched = false;
+      for (auto it_name = preferred_plats.begin(); it_name != preferred_plats.end(); ++it_name) {
+        if (_strnicmp(*it_name, name.data(), strlen(*it_name)) == 0) {
+          preferred_name_matched = true;
           break;
         }
       }
-
-      if(plat_id2) break;
+      if(!preferred_name_matched)
+        continue;
     }
-  } else {
-    plat_id2 = platforms[0];
+
+    num_devs = 0;
+    if(glrc) {
+      clGetGLContextInfoKHR =
+          (clGetGLContextInfoKHR_fn)clGetExtensionFunctionAddressForPlatform(*itPlat, "CLGetGLContextInfoKHR");
+      if(clGetGLContextInfoKHR) {
+        cl_context_properties props[] = {
+          CL_GL_CONTEXT_KHR, (cl_context_properties)glrc,
+          #ifdef __linux__
+          CL_GLX_DISPLAY_KHR, (cl_context_properties)glsurface,
+          #elif defined(_WIN32)
+          CL_WGL_HDC_KHR, (cl_context_properties)glsurface,
+          #else
+          #error Unknown GL surface support!
+          #endif
+          CL_CONTEXT_PLATFORM, (cl_context_properties)*itPlat,
+          0
+        };
+
+        V_RETURN(clGetGLContextInfoKHR(props, CL_DEVICES_FOR_GL_CONTEXT_KHR, 0, nullptr, &num_devs));
+        if(num_devs == 0)
+          continue;
+        devs.resize(num_devs / sizeof(cl_device_id));
+        V_RETURN(clGetGLContextInfoKHR(props, CL_DEVICES_FOR_GL_CONTEXT_KHR, num_devs, (void *)devs.data(), nullptr));
+      }
+    }
+
+    if(num_devs == 0) {
+      V_RETURN(clGetDeviceIDs(*itPlat, dev_type, 0, nullptr, (cl_uint *)&num_devs));
+      if (num_devs == 0)
+        continue;
+
+      devs.resize(num_devs);
+      V_RETURN(clGetDeviceIDs(*itPlat, dev_type, num_devs, (cl_device_id *)devs.data(), nullptr));
+    }
+
+    for(auto it_dev = devs.begin(); it_dev != devs.end(); ++it_dev) {
+
+      V_RETURN(clGetDeviceInfo(*it_dev, CL_DEVICE_TYPE, sizeof(dev_type2), &dev_type2, nullptr));
+      if(dev_type != dev_type2)
+        continue;
+
+      if(CheckCLExtensions(*it_dev, req_extensions) == CL_SUCCESS) {
+        sel_platform = *itPlat;
+        sel_device = *it_dev;
+        break;
+      }
+    }
   }
 
-  *plat_id = plat_id2;
-  return plat_id2 ? CL_SUCCESS : -1;
+  *plat_id = sel_platform;
+  *device = sel_device;
+
+  return sel_platform ? CL_SUCCESS : -1;
 }
 
-CLHRESULT CreateDeviceContext(cl_platform_id plat_id, cl_device_type dev_type, cl_device_id *dev, cl_context *dev_ctx) {
+CLHRESULT CreateDeviceContext(cl_platform_id plat_id, cl_device_id dev, cl_context *dev_ctx) {
   CLHRESULT hr;
 
   cl_context_properties ctx_props[] = {CL_CONTEXT_PLATFORM, (cl_context_properties)plat_id, 0};
-  *dev_ctx = clCreateContextFromType(ctx_props, dev_type, nullptr, nullptr, &hr);
-  V_RETURN(hr);
-
-  V_RETURN(clGetContextInfo(*dev_ctx, CL_CONTEXT_DEVICES, sizeof(*dev), dev, nullptr));
+  V_RETURN2(*dev_ctx = clCreateContext(ctx_props, 1, &dev, nullptr, nullptr, &hr), hr);
 
   return hr;
 }

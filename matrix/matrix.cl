@@ -1,6 +1,12 @@
 #define LOCAL_SIZE_X    16
 #define LOCAL_SIZE_Y    16
 
+#ifdef  _USE_DOUBLE_FP
+#define _REAL_BANK_WITH   8
+#else
+#define _REAL_BANK_WITH   4
+#endif
+
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose(__global const REAL *in, __global REAL *out, int M, int N) {
 
@@ -18,7 +24,7 @@ __kernel void mat_transpose(__global const REAL *in, __global REAL *out, int M, 
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose_opt1(__global const REAL *in, __global REAL *out, int M, int N) {
 
-  __local REAL tile[LOCAL_SIZE_Y][LOCAL_SIZE_X + 1];
+  __local REAL __attribute__((numbanks(LOCAL_SIZE_X), bankwith(_REAL_BANK_WITH))) tile[LOCAL_SIZE_Y][LOCAL_SIZE_X + 1];
   const int2 gid = (int2)(get_global_id(0), get_global_id(1));
   const int2 gsize = (int2)(get_global_size(0), get_global_size(1));
   const int2 tid = (int2)(get_local_id(0), get_local_id(1));
@@ -45,7 +51,7 @@ __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_Y, 1)))
 __kernel void mat_transpose_opt2(__global const REAL *in, __global REAL *out, uint M, uint N) {
 
 #ifdef _USE_DOUBLE_FP
-  __local uint tile[2*LOCAL_SIZE_Y][LOCAL_SIZE_X + 1];
+  __local uint __attribute__((numbanks(LOCAL_SIZE_X), bankwith(4))) tile[2*LOCAL_SIZE_Y][LOCAL_SIZE_X + 1];
   const uint2 gid = (uint2)(get_global_id(0), get_global_id(1));
   const uint2 gsize = (uint2)(get_global_size(0), get_global_size(1));
   const uint2 tid = (uint2)(get_local_id(0), get_local_id(1));
@@ -87,7 +93,6 @@ __kernel void mat_mul(__global const REAL *A, __global const REAL *B, __global R
   REAL a, b, c = 0.0;
 
   if(i.x < MKN.z && i.y < MKN.x) {
-    #pragma unroll
     for(int k = 0; k < MKN.y; ++k) {
       a = A[MKN.y*i.y + k];
       b = B[MKN.z*k + i.x];
@@ -102,7 +107,7 @@ __kernel void mat_mul(__global const REAL *A, __global const REAL *B, __global R
 __attribute__((reqd_work_group_size(LOCAL_SIZE_X, LOCAL_SIZE_X, 1)))
 __kernel void mat_mul_opt1(__global const REAL *A, __global const REAL *B, __global REAL *C, const uint4 MKN) {
 
-  __local REAL tile[2*LOCAL_SIZE_X*LOCAL_SIZE_X];
+  __local REAL __attribute__((numbanks(LOCAL_SIZE_X), bankwith(_REAL_BANK_WITH))) tile[2*LOCAL_SIZE_X*LOCAL_SIZE_X];
   int2 gid = (int2)(get_global_id(0), get_global_id(1));
   int2 tid = (int2)(get_local_id(0), get_local_id(1));
   const int2 mn_bsign = (int2)(gid.y < MKN.x, gid.x < MKN.z);
@@ -115,7 +120,6 @@ __kernel void mat_mul_opt1(__global const REAL *A, __global const REAL *B, __glo
   int2 kk2;
   int tile_index;
 
-  #pragma unroll
   for(int k = 0; k < MKN.y; k += LOCAL_SIZE_X) {
 
     kk = (int2)(k, k) + tid;
@@ -127,7 +131,7 @@ __kernel void mat_mul_opt1(__global const REAL *A, __global const REAL *B, __glo
     tile_a[tile_index] = kk2.x*A[gid.y*MKN.y + kk.x];
     tile_b[tile_index] = kk2.y*B[kk.y*MKN.z + gid.x];
     barrier(CLK_LOCAL_MEM_FENCE);
-    #pragma unroll
+    #pragma unroll (LOCAL_SIZE_X)
     for(int i = 0; i < LOCAL_SIZE_X; ++i) {
       c += tile_a[tid.y*LOCAL_SIZE_X+i] * tile_b[i*LOCAL_SIZE_X + tid.x];
     }

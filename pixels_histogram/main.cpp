@@ -45,15 +45,14 @@ void PrintHistogram(const uint32_t *histo) {
 int main() {
 
   CLHRESULT hr;
-  const char *preferred_plats[] = {"NVIDIA CUDA", "AMD", nullptr };
   ycl_platform_id platform;
   ycl_device_id device;
   ycl_context context;
   ycl_command_queue cmd_queue;
 
-  V_RETURN(FindOpenCLPlatform(preferred_plats, CL_DEVICE_TYPE_GPU, &platform));
+  V_RETURN(FindOpenCLPlatform(CL_DEVICE_TYPE_GPU, {"NVIDIA CUDA", "AMD"}, {}, &platform, &device));
 
-  V_RETURN(CreateDeviceContext(platform, CL_DEVICE_TYPE_GPU, &device, &context));
+  V_RETURN(CreateDeviceContext(platform, device, &context));
 
   V_RETURN(CreateCommandQueue(context, device, &cmd_queue));
 

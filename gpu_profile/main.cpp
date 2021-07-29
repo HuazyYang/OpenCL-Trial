@@ -12,10 +12,9 @@ int main() {
   cl_ulong mem_size;
   cl_uint mem_cacheline_size;
 
-  V_RETURN(FindOpenCLPlatform(nullptr, CL_DEVICE_TYPE_GPU, &platfrom));
+  V_RETURN(FindOpenCLPlatform(CL_DEVICE_TYPE_GPU, {}, {}, &platfrom, &device));
 
-  V_RETURN(CreateDeviceContext(platfrom, CL_DEVICE_TYPE_GPU, device.ReleaseAndGetAddressOf(),
-                               context.ReleaseAndGetAddressOf()));
+  V_RETURN(CreateDeviceContext(platfrom, device, &context));
 
   V_RETURN(clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(nbuff), nbuff, 0));
   printf("GPU device name: %s\n", nbuff);

@@ -102,10 +102,8 @@ int main() {
   ycl_context context;
   ycl_command_queue cmd_queue;
 
-  const char *preferred_plats[] = { "NVIDIA", "AMD", nullptr };
-
-  V_RETURN(FindOpenCLPlatform(preferred_plats, CL_DEVICE_TYPE_GPU, &platform));
-  V_RETURN(CreateDeviceContext(platform, CL_DEVICE_TYPE_GPU, &device, &context));
+  V_RETURN(FindOpenCLPlatform(CL_DEVICE_TYPE_GPU, {"NVIDIA CUDA", "AMD"}, {}, &platform, &device));
+  V_RETURN(CreateDeviceContext(platform, device, &context));
   V_RETURN(CreateCommandQueue(context, device, &cmd_queue));
 
   std::uniform_int_distribution<uint32_t> id(10, 100000);

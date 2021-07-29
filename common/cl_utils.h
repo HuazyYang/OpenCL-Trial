@@ -222,15 +222,28 @@ using ycl_buffer = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::BUFFER>;
 using ycl_image = CLxObjectSPtr<cl_mem, CLX_OBJECT_TYPE::IMAGE>;
 using ycl_sampler = CLxObjectSPtr<cl_sampler, CLX_OBJECT_TYPE::SAMPLER>;
 
+extern CLHRESULT CheckCLExtensions(cl_device_id device, std::initializer_list<const char *> req_extensions);
+
 /**
  * @param preferred_plats is a string of string terminated with nullptr.
  * 
  */
-extern CLHRESULT
-FindOpenCLPlatform(const char *const *preferred_plats, cl_device_type dev_type, cl_platform_id *plat_id);
+extern CLHRESULT FindOpenCLPlatform(cl_device_type dev_type,
+                                    std::initializer_list<const char *> preferred_plats,
+                                    std::initializer_list<const char *> req_extensions,
+                                    cl_platform_id *plat_id,
+                                    cl_device_id *device);
+
+extern CLHRESULT FindOpenCLPlatform2(cl_device_type dev_type,
+                                     std::initializer_list<const char *> preferred_plats,
+                                     std::initializer_list<const char *> req_extensions,
+                                     void *glrc,  // Optional
+                                     void *glsurface, // Optional
+                                     cl_platform_id *plat_id,
+                                     cl_device_id *device);
 
 extern CLHRESULT CreateDeviceContext(
-  cl_platform_id plat_id, cl_device_type dev_type, cl_device_id *dev, cl_context *dev_ctx);
+  cl_platform_id plat_id, cl_device_id dev, cl_context *dev_ctx);
 
 extern CLHRESULT CreateCommandQueue(cl_context dev_ctx, cl_device_id device, cl_command_queue *cmd_queue);
 

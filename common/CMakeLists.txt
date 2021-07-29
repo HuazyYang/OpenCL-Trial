@@ -6,7 +6,15 @@ add_library(
   cl_utils.h
   common_miscs.cpp
   common_miscs.h
+
+  # OpenGL staff
+  ${GLAD_SOURCE_DIR}/glad.c
+  glx_utils.cpp
+  glx_utils.hpp
+  glx_shader_program.cpp
+  glx_shader_program.hpp
 )
+
 target_link_libraries(
   ${PROJECT_NAME}
   OpenCL

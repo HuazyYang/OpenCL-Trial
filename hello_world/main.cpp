@@ -145,9 +145,9 @@ int main() {
   ycl_command_queue cmd_queue;
   ycl_program program;
 
-  V_RETURN(FindOpenCLPlatform(nullptr, dev_type, &platform_id));
+  V_RETURN(FindOpenCLPlatform(dev_type, {}, {}, &platform_id, &device));
 
-  V_RETURN(CreateDeviceContext(platform_id, dev_type, device.ReleaseAndGetAddressOf(), context.ReleaseAndGetAddressOf()));
+  V_RETURN(CreateDeviceContext(platform_id, device, context.ReleaseAndGetAddressOf()));
 
   V_RETURN(CreateCommandQueue(context, device, cmd_queue.ReleaseAndGetAddressOf()));
 
