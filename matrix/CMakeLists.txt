@@ -17,12 +17,12 @@ target_compile_options(
 target_link_libraries(
   ${PROJECT_NAME}
   common
-  OpenCL
 )
 
-copy_assets(ocl_src_files "" copied_${PROJECT_NAME}_ocl_files)
+clang_oclxx_to_spirv(ocl_src_files "-D_USE_DOUBLE_FP=1 -I\"${COMMON_INCLUDE_DIR}\"" "OCL-SpirV" "matrix.spv" ${PROJECT_NAME}_spv_files)
 
 add_custom_target(
-  ${PROJECT_NAME}CopyOCLFiles ALL
-  DEPENDS ${copied_${PROJECT_NAME}_ocl_files}
+  ${PROJECT_NAME}CompiledSpvFiles ALL
+  DEPENDS ${${PROJECT_NAME}_spv_files}
+  SOURCES ${ocl_src_files}
 )

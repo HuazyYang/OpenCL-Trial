@@ -11,7 +11,6 @@ add_executable(
 target_link_libraries(
   ${PROJECT_NAME}
   common
-  OpenCL
 )
 
 copy_assets(ocl_src_files "" copied_${PROJECT_NAME}_ocl_files)

@@ -249,9 +249,13 @@ extern CLHRESULT CreateCommandQueue(cl_context dev_ctx, cl_device_id device, cl_
 
 extern CLHRESULT CreateProgramFromSource(
   cl_context context, cl_device_id device, const char *defines, const char *source, size_t src_len, cl_program *program);
+extern CLHRESULT CreateProgramFromIL(
+  cl_context context, cl_device_id device, const void *il, size_t il_len, cl_program *program);
 
 extern CLHRESULT CreateProgramFromFile(
     cl_context context, cl_device_id device, const char *defines, const char *fname, cl_program *program);
+extern CLHRESULT CreateProgramFromILFile(
+  cl_context context, cl_device_id device, const char *fname, cl_program *program);
 
 template<typename ...TArgs> struct __SetKernelArgumentsImpl {
 private:

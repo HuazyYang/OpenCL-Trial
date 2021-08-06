@@ -9,14 +9,7 @@ if(NOT CMAKE_BUILD_TYPE OR NOT CMAKE_CONFIGURATION_TYPES)
     "MinSizeRel" "RelWithDebInfo")
 endif()
 
-if(CMAKE_BUILD_TYPE)
-  set(TOUPPER "${CMAKE_BUILD_TYPE}" MY_CXX_BUILD_TYPE_EXT)
-  set(TOUPPER "_${CMAKE_BUILD_TYPE}" MY_C_BUILD_TYPE_EXT)
-  add_compile_definitions(${MY_C_BUILD_TYPE_EXT} ${MY_CXX_BUILD_TYPE_EXT})
-
-  set(TRIAL_OUTDIR_END_SUFFIX ${CMAKE_BUILD_TYPE})
-  set(TRIAL_OUTDIR_SUFFIX ${TRIAL_OUTDIR_END_SUFFIX})
-else()
+if(NOT CMAKE_BUILD_TYPE)
   message(FATAL_ERROR "Build type unspecified!")
 endif()
 
@@ -45,18 +38,18 @@ add_subdirectory(${THIRD_PARTY_DIR}/glfw ${CMAKE_CURRENT_BINARY_DIR}/glfw)
 include_directories(${THIRD_PARTY_DIR}/glfw/include)
 link_directories(${CMAKE_CURRENT_BINARY_DIR}/glfw/src/${CMAKE_BUILD_TYPE})
 
-if(${CMAKE_GENERATOR_PLATFORM} STREQUAL "x86")
-  link_directories("$ENV{INTELOCLSDKROOT}/lib/x86")
-elseif(${CMAKE_GENERATOR_PLATFORM} STREQUAL "x64")
-  link_directories("$ENV{INTELOCLSDKROOT}/lib/x64")
-else()
-  message(ERROR "Unknown OpenCL target generator platform!")
+enable_language(C CXX)
+find_package(OpenCL REQUIRED)
+if(NOT OpenCL_FOUND)
+  message(ERROR "Can not found OpenCL SDK!")
 endif()
+include_directories("${OpenCL_INCLUDE_DIRS}")
+
+get_filename_component(OPENCL_LIBRARY_DIR "${OpenCL_LIBRARY}" DIRECTORY)
+message(STATUS "OpenCL link lib path: ${OPENCL_LIBRARY_DIR}")
+link_directories("${OPENCL_LIBRARY_DIR}")
 
 project(OpenGL-Trial VERSION 0.1.0)
-
-# Set target OpenCL version to 2.0
-add_compile_options("/DCL_TARGET_OPENCL_VERSION=200")
 
 add_subdirectory(common)
 add_subdirectory(hello_world)

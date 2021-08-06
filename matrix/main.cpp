@@ -6,6 +6,7 @@
 #include <intrin.h>
 #include <immintrin.h>
 #include <type_traits>
+#include <fstream>
 
 #define __AVX2_ALIGNED   __declspec(align(32))
 
@@ -775,8 +776,7 @@ void mxm_avx2_unroll(
 }
 
 static ycl_program g_pMatrixProgram;
-static ycl_program g_pMatMulVecProgram;
-
+static ycl_program g_pMatMuplVecProgram;
 
 CLHRESULT TestMatrixTransposeProfile(
     cl_context context, cl_device_id device, cl_command_queue cmd_queue, size_t ncols, size_t nrows) {
@@ -1120,7 +1120,7 @@ CLHRESULT TestMatMulVecProfile(
   V_RETURN(
       clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_ITEM_SIZES, sizeof(max_work_item_size), max_work_item_size, nullptr));
 
-  V_RETURN2(kernel <<= clCreateKernel(g_pMatMulVecProgram, "mxv_block", &hr), hr);
+  V_RETURN2(kernel <<= clCreateKernel(g_pMatrixProgram, "mxv_block", &hr), hr);
   V_RETURN(SetKernelArguments(kernel, &mat_buffer, &vec_buffer, &row_size, &col_size, &pitch_size, &res_buffer));
   V_RETURN(clGetKernelWorkGroupInfo(kernel, device, CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(group_size), group_size, nullptr));
 
@@ -1141,7 +1141,8 @@ CLHRESULT TestMatMulVecProfile(
     elapsed.count());
   printf("results coincidence: %s\n", check_matrix_equiv(res_data, res_data2, 1.0E-6, mat_rows, 1) ? "true" : "false");
 
-  V_RETURN2(kernel <<= clCreateKernel(g_pMatMulVecProgram, "mxv_warp", &hr), hr);
+  V_RETURN2(kernel <<= clCreateKernel(g_pMatMuplVecProgram, "mxv_warp", &hr),
+            hr);
   V_RETURN(SetKernelArguments(kernel, &mat_buffer, &vec_buffer, &row_size, &col_size, &pitch_size, &res_buffer));
   V_RETURN(clGetKernelWorkGroupInfo(kernel, device, CL_KERNEL_COMPILE_WORK_GROUP_SIZE, sizeof(group_size), group_size,
                                     nullptr));
@@ -1179,7 +1180,8 @@ int main() {
   V_RETURN(CreateDeviceContext(platform, device, &context));
   V_RETURN(CreateCommandQueue(context, device, &cmd_queue));
 
-  V_RETURN(CreateProgramFromFile(context, device, "#define _USE_DOUBLE_FP", "matrix.cl", &g_pMatrixProgram));
+  V_RETURN(CreateProgramFromILFile(context, device, "OCL-SpirV/matrix.spv", &g_pMatrixProgram));
+  g_pMatMuplVecProgram = g_pMatrixProgram;
 
   std::uniform_int_distribution<size_t> transpose_ncols_nrows_distr(16, 5000);
 
@@ -1190,32 +1192,30 @@ int main() {
     printf("\n");
   }
 
-  // std::uniform_int_distribution<size_t> mul_ncols_nrows_distr(510, 2000);
+  std::uniform_int_distribution<size_t> mul_ncols_nrows_distr(510, 2000);
 
-  // for(ptrdiff_t i = 0; i < 20; ++i) {
-  //   printf("Matrix Multiplication Profile [%lld]:\n", i);
-  //   TestMatrixMulitplicationProfile(context, device, cmd_queue, mul_ncols_nrows_distr(g_RandomEngine),
-  //                                   mul_ncols_nrows_distr(g_RandomEngine), mul_ncols_nrows_distr(g_RandomEngine));
-  //   printf("\n");
-  // }
+  for(ptrdiff_t i = 0; i < 20; ++i) {
+    printf("Matrix Multiplication Profile [%lld]:\n", i);
+    TestMatrixMulitplicationProfile(context, device, cmd_queue, mul_ncols_nrows_distr(g_RandomEngine),
+                                    mul_ncols_nrows_distr(g_RandomEngine), mul_ncols_nrows_distr(g_RandomEngine));
+    printf("\n");
+  }
 
-  // V_RETURN(CreateProgramFromFile(context, device, "#define _USE_DOUBLE_FP", "mat_mul_vec.cl", &g_pMatMulVecProgram));
+  std::uniform_int_distribution<size_t> mxv_ncols_distr(510, 5000);
 
-  // std::uniform_int_distribution<size_t> mxv_ncols_distr(510, 5000);
+  for(ptrdiff_t i = 0; i < 40; ++i) {
 
-  // for(ptrdiff_t i = 0; i < 40; ++i) {
+    size_t mat_rows = mxv_ncols_distr(g_RandomEngine);
+    size_t mat_cols = mxv_ncols_distr(g_RandomEngine);
+    size_t mat_pitch = mxv_ncols_distr(g_RandomEngine);
 
-  //   size_t mat_rows = mxv_ncols_distr(g_RandomEngine);
-  //   size_t mat_cols = mxv_ncols_distr(g_RandomEngine);
-  //   size_t mat_pitch = mxv_ncols_distr(g_RandomEngine);
+    printf("Matrix-Vector Multiplication Profile [%lld]:\n", i);
+    if(mat_cols > mat_pitch)
+      std::swap(mat_cols, mat_pitch);
 
-  //   printf("Matrix-Vector Multiplication Profile [%lld]:\n", i);
-  //   if(mat_cols > mat_pitch)
-  //     std::swap(mat_cols, mat_pitch);
-
-  //   TestMatMulVecProfile(context, device, cmd_queue, mat_rows, mat_cols, mat_pitch);
-  //   printf("\n");
-  // }
+    TestMatMulVecProfile(context, device, cmd_queue, mat_rows, mat_cols, mat_pitch);
+    printf("\n");
+  }
 
   return hr;
 }

@@ -368,8 +368,7 @@ CLHRESULT CreateProgramFromSource(
   char cl_optbuff[128];
   sprintf_s(cl_optbuff, _countof(cl_optbuff), "-cl-std=CL%s", pver);
 
-  *program = clCreateProgramWithSource(context, _countof(sources), sources, src_lens, &hr);
-  V_RETURN(hr);
+  V_RETURN2(*program = clCreateProgramWithSource(context, _countof(sources), sources, src_lens, &hr), hr);
 
   hr = clBuildProgram(*program, 1, &device, cl_optbuff, nullptr, nullptr);
   if (hr == CL_BUILD_PROGRAM_FAILURE) {
@@ -380,6 +379,46 @@ CLHRESULT CreateProgramFromSource(
 
     build_log.resize(log_size);
     clGetProgramBuildInfo(*program, device, CL_PROGRAM_BUILD_LOG, log_size, build_log.data(), nullptr);
+    CL_TRACE(hr, "Build CL program erorr, log:\n%s\n", build_log.data());
+  }
+
+  if (CL_FAILED(hr)) {
+    *program = nullptr;
+    V_RETURN(hr);
+  }
+
+  return hr;
+}
+
+CLHRESULT CreateProgramFromIL(cl_context context, cl_device_id device,
+                              const void *il, size_t il_len,
+                              cl_program *program) {
+
+  CLHRESULT hr;
+  char tempbuff[256];
+  V_RETURN(clGetDeviceInfo(device, CL_DEVICE_OPENCL_C_VERSION, sizeof(tempbuff),
+                           tempbuff, nullptr));
+  char *token_ctx;
+  char *pver = strtok_s(tempbuff, " ", &token_ctx);
+  pver = strtok_s(nullptr, " ", &token_ctx);
+  pver = strtok_s(nullptr, " ", &token_ctx);
+
+  char cl_optbuff[128];
+  sprintf_s(cl_optbuff, _countof(cl_optbuff), "-cl-std=CL%s", pver);
+
+  V_RETURN2(*program = clCreateProgramWithIL(context, il, il_len, &hr), hr);
+
+  hr = clBuildProgram(*program, 1, &device, cl_optbuff, nullptr, nullptr);
+  if (hr == CL_BUILD_PROGRAM_FAILURE) {
+    size_t log_size = 0;
+    std::vector<char> build_log;
+
+    clGetProgramBuildInfo(*program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr,
+                          &log_size);
+
+    build_log.resize(log_size);
+    clGetProgramBuildInfo(*program, device, CL_PROGRAM_BUILD_LOG, log_size,
+                          build_log.data(), nullptr);
     CL_TRACE(hr, "Build CL program erorr, log:\n%s\n", build_log.data());
   }
 
@@ -411,4 +450,26 @@ CLHRESULT CreateProgramFromFile(
   fin.close();
 
   return CreateProgramFromSource(context, device, defines, source.data(), srclen, program);
+}
+
+CLHRESULT CreateProgramFromILFile(cl_context context, cl_device_id device,
+                                  const char *fname, cl_program *program) {
+
+  CLHRESULT hr;
+
+  std::ifstream fin(fname, std::fstream::binary);
+  if (!fin) {
+    V_RETURN(("Invalid binary file", CL_INVALID_BINARY));
+  }
+
+  std::vector<char> source;
+  std::streamsize srclen;
+  fin.seekg(0, std::fstream::end);
+  srclen = fin.tellg();
+  fin.seekg(0, std::fstream::beg);
+  source.resize(srclen);
+  fin.read((char *)source.data(), srclen);
+  fin.close();
+
+  return CreateProgramFromIL(context, device, source.data(), srclen, program);
 }

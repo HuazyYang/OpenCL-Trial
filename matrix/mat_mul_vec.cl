@@ -1,3 +1,5 @@
+#include <common.cl.h>
+
 #define BLOCKED_LOCAL_SIZE_X 256
 
 #define WARP_LOCAL_SIZE_X 32

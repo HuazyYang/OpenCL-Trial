@@ -22,5 +22,4 @@ add_custom_target(
 target_link_libraries(
   ${PROJECT_NAME}
   common
-  OpenCL
 )
