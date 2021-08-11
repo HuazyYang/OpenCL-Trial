@@ -420,6 +420,7 @@ CLHRESULT CreateProgramFromIL(cl_context context, cl_device_id device,
     clGetProgramBuildInfo(*program, device, CL_PROGRAM_BUILD_LOG, log_size,
                           build_log.data(), nullptr);
     CL_TRACE(hr, "Build CL program erorr, log:\n%s\n", build_log.data());
+    return hr;
   }
 
   if (CL_FAILED(hr)) {
