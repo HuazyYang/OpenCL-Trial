@@ -16,8 +16,8 @@ set(output_dir ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${dir_name})
 foreach(shader ${${oclxx_source_files}})
   get_filename_component(file_ext ${shader} LAST_EXT)
 
-  if(NOT ${file_ext} STREQUAL ".hxx" AND NOT ${file_ext} STREQUAL "h" AND
-    NOT ${file_ext} STREQUAL ".hpp")
+  if((NOT ${file_ext} STREQUAL ".hxx") AND (NOT ${file_ext} STREQUAL ".h") AND
+    (NOT ${file_ext} STREQUAL ".hpp"))
     message("Compile OpenCL source to SPIRV: ${shader}")
     get_filename_component(file_name ${shader} NAME)
     get_filename_component(full_path ${shader} ABSOLUTE)
@@ -29,7 +29,7 @@ foreach(shader ${${oclxx_source_files}})
       add_custom_command(
           OUTPUT ${output_file}
           COMMAND ${CLANG_CXX_EXECUTABLE} -cc1 -emit-spirv -triple=spir64-unknown-unknown
-                    -cl-std=CL2.0 -include opencl.h  ${aux_options} -x cl -o ${output_file} ${full_path}
+                    -cl-std=CL2.0 ${aux_options} -x cl -o ${output_file} ${full_path}
           DEPENDS ${full_path}
           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       )
@@ -38,7 +38,7 @@ foreach(shader ${${oclxx_source_files}})
         OUTPUT ${output_file}
         COMMAND mkdir --parents ${output_dir} &&
           ${CLANG_CXX_EXECUTABLE} -cc1 -emit-spirv -triple=spir64-unknown-unknown
-            -cl-std=CL2.0 -include opencl.h ${aux_options} -x cl -o ${output_file} ${full_path}
+            -cl-std=CL2.0 ${aux_options} -x cl -o ${output_file} ${full_path}
         DEPENDS ${full_path}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       )

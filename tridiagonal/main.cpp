@@ -9,23 +9,25 @@
 
 static ycl_program g_pTridiagProgram;
 
-CLHRESULT TestSolvingDiagonalEquation(cl_command_queue cmd_queue, size_t dimx) {
+CLHRESULT TestSolvingSmallDiagonalSystem(cl_command_queue cmd_queue, size_t dimx) {
 
-  CLHRESULT hr;
+  CLHRESULT hr = 0;
   cl_device_id device;
   cl_context context;
   ycl_kernel kernel;
   size_t buffer_len;
   cl_uint dimx32;
   cl_uint iterations32;
+  cl_uint stride32;
   size_t local_mem_buffer_len;
   ycl_buffer a_d, b_d, c_d, d_d, x_d;
-  double zero_pattern = 0;
+  uint64_t clr_pattern = -1ll;
   ycl_event done_ev;
   size_t local_size;
 
   std::uniform_int_distribution gen_pattern_distr(0, 3);
   tridiagonal_mat<double> A;
+  size_t tmp_buffer_stride;
   std::unique_ptr<double[]> tmp_buffer;
   double *tmp[4];
   column_vec<double> d;
@@ -41,11 +43,12 @@ CLHRESULT TestSolvingDiagonalEquation(cl_command_queue cmd_queue, size_t dimx) {
   x0.alloc(dimx);
   x.alloc(dimx);
 
-  tmp_buffer.reset(new double[dimx*4]);
+  tmp_buffer_stride = dimx + (dimx + 1) / 2;
+  tmp_buffer.reset(new double[tmp_buffer_stride*4]); // implies that 6 * n < 4 * (3 * n + 1) / 2
   tmp[0] = tmp_buffer.get();
-  tmp[1] = tmp[0] + dimx;
-  tmp[2] = tmp[1] + dimx;
-  tmp[3] = tmp[2] + dimx;
+  tmp[1] = tmp[0] + tmp_buffer_stride;
+  tmp[2] = tmp[1] + tmp_buffer_stride;
+  tmp[3] = tmp[2] + tmp_buffer_stride;
 
   test_gen_cyclic(A.a, A.b, A.c, d.v, dimx, gen_pattern_distr(g_RandomEngine));
 
@@ -59,6 +62,7 @@ CLHRESULT TestSolvingDiagonalEquation(cl_command_queue cmd_queue, size_t dimx) {
          "%.3fms\n",
          elapsed.count());
 
+  memset(x.v, -1, sizeof(double)*x.dim_y);
   start = hp_timer::now();
   cpu_solver::cyclic_reduction(&A, &d, &x, tmp[0], tmp[1], tmp[2], tmp[3]);
   fin = hp_timer::now();
@@ -70,6 +74,35 @@ CLHRESULT TestSolvingDiagonalEquation(cl_command_queue cmd_queue, size_t dimx) {
   difference = compare_var(x.v, x0.v, x0.dim_y);
   printf("CPU CR difference: max: %.4f, mean: %.4f, sqrt_mean: %.4f\n", std::get<0>(difference),
          std::get<1>(difference), std::get<2>(difference));
+
+  memset(x.v, -1, sizeof(double) * x.dim_y);
+  start = hp_timer::now();
+  cpu_solver::parallel_cyclic_reduction(&A, &d, &x, tmp[0], tmp[1], tmp[2], tmp[3]);
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("CPU PCR elapsed:                                                   "
+         "%.3fms\n",
+         elapsed.count());
+
+  difference = compare_var(x.v, x0.v, x0.dim_y);
+  printf("CPU PCR difference: max: %.4f, mean: %.4f, sqrt_mean: %.4f\n",
+         std::get<0>(difference), std::get<1>(difference),
+         std::get<2>(difference));
+
+/*   memset(x.v, -1, sizeof(double) * x.dim_y);
+  start = hp_timer::now();
+  // This one tends to numeric instable in most cases.
+  cpu_solver::recursive_doubling(&A, &d, &x, (double(*)[2][3])tmp[0], [](double c) { return std::abs(c) > 1.0e-5; });
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("CPU RD elapsed:                                                    "
+         "%.3fms\n",
+         elapsed.count());
+
+  difference = compare_var(x.v, x0.v, x0.dim_y);
+  printf("CPU RD difference: max: %.4f, mean: %.4f, sqrt_mean: %.4f\n",
+         std::get<0>(difference), std::get<1>(difference),
+         std::get<2>(difference)); */
 
   V_RETURN(clGetCommandQueueInfo(cmd_queue, CL_QUEUE_CONTEXT, sizeof(context), &context, nullptr));
   V_RETURN(clGetCommandQueueInfo(cmd_queue, CL_QUEUE_DEVICE, sizeof(device), &device, nullptr));
@@ -103,20 +136,22 @@ CLHRESULT TestSolvingDiagonalEquation(cl_command_queue cmd_queue, size_t dimx) {
   dimx32 = static_cast<cl_uint>(A.dim_x);
   local_mem_buffer_len = buffer_len*5;
   iterations32 = cpu_solver::log2c(dimx);
+  stride32 = 1;
 
-  V_RETURN2(kernel <<= clCreateKernel(g_pTridiagProgram, "cr_kernel", &hr), hr);
-  V_RETURN(SetKernelArguments(kernel, &a_d, &b_d, &c_d, &d_d, &x_d, &dimx32, &iterations32, local_mem_buffer_len));
+  V_RETURN2(
+      kernel <<= clCreateKernel(g_pTridiagProgram, "cr_small_system", &hr), hr);
+  V_RETURN(SetKernelArguments(kernel, &a_d, &b_d, &c_d, &d_d, &x_d, &dimx32, &iterations32, &stride32, local_mem_buffer_len));
 
-  local_size = RoundC(dimx, 32);
+  local_size = RoundC(dimx >> 1, 32);
   start = hp_timer::now();
-  V_RETURN(clEnqueueFillBuffer(cmd_queue, x_d, &zero_pattern, sizeof(zero_pattern), 0, buffer_len, 0, nullptr, nullptr));
+  V_RETURN(clEnqueueFillBuffer(cmd_queue, x_d, &clr_pattern, sizeof(clr_pattern), 0, buffer_len, 0, nullptr, nullptr));
   V_RETURN(clEnqueueNDRangeKernel(cmd_queue, kernel, 1, nullptr, &local_size, &local_size, 0, nullptr, nullptr));
-  V_RETURN(clEnqueueReadBuffer(cmd_queue, x_d, false, 0, buffer_len, x.v, 0, nullptr, &done_ev));
+  V_RETURN(clEnqueueReadBuffer(cmd_queue, x_d, false, 0, buffer_len, x.v, 0, nullptr, done_ev.ReleaseAndGetAddressOf()));
   V_RETURN(clFlush(cmd_queue));
   V_RETURN(clWaitForEvents(1, &done_ev));
   fin = hp_timer::now();
   elapsed = fmilliseconds_cast(fin - start);
-  printf("CPU CR(Small System) elapsed:                                      "
+  printf("GPU CR(Small System) elapsed:                                      "
          "%.3fms\n",
          elapsed.count());
 
@@ -125,7 +160,35 @@ CLHRESULT TestSolvingDiagonalEquation(cl_command_queue cmd_queue, size_t dimx) {
          "%.4f\n",
          std::get<0>(difference), std::get<1>(difference),
          std::get<2>(difference));
-  
+
+  V_RETURN2(
+      kernel <<= clCreateKernel(g_pTridiagProgram, "pcr_small_system", &hr), hr);
+  local_mem_buffer_len = (buffer_len + sizeof(double))*4 + buffer_len;
+  V_RETURN(SetKernelArguments(kernel, &a_d, &b_d, &c_d, &d_d, &x_d, &dimx32,
+                              &iterations32, &stride32, local_mem_buffer_len));
+
+  local_size = RoundC(dimx, 32);
+  start = hp_timer::now();
+  V_RETURN(clEnqueueFillBuffer(cmd_queue, x_d, &clr_pattern,
+                               sizeof(clr_pattern), 0, buffer_len, 0, nullptr,
+                               nullptr));
+  V_RETURN(clEnqueueNDRangeKernel(cmd_queue, kernel, 1, nullptr, &local_size,
+                                  &local_size, 0, nullptr, nullptr));
+  V_RETURN(clEnqueueReadBuffer(cmd_queue, x_d, false, 0, buffer_len, x.v, 0,
+                               nullptr, done_ev.ReleaseAndGetAddressOf()));
+  V_RETURN(clFlush(cmd_queue));
+  V_RETURN(clWaitForEvents(1, &done_ev));
+  fin = hp_timer::now();
+  elapsed = fmilliseconds_cast(fin - start);
+  printf("GPU PCR(Small System) elapsed:                                     "
+         "%.3fms\n",
+         elapsed.count());
+
+  difference = compare_var(x.v, x0.v, x0.dim_y);
+  printf("GPU PCR(Small System) difference: max: %.4f, mean: %.4f, sqrt_mean: "
+         "%.4f\n",
+         std::get<0>(difference), std::get<1>(difference),
+         std::get<2>(difference));
 
   return hr;
 }
@@ -148,8 +211,8 @@ int main() {
   std::uniform_int_distribution<size_t> diag_dim_distr(1, 256);
 
   for(ptrdiff_t i = 0; i < 110; ++i) {
-    printf("Test case[%lld]\n", i+1);
-    TestSolvingDiagonalEquation(cmd_queue, diag_dim_distr(g_RandomEngine));
+    printf("Test case[%lld] -- Small System\n", i+1);
+    TestSolvingSmallDiagonalSystem(cmd_queue,  diag_dim_distr(g_RandomEngine));
     printf("\n");
   }
 }

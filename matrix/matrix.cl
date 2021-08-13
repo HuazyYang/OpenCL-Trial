@@ -1,5 +1,5 @@
-#include <common.cl.h>
 #include <opencl.h>
+#include <common.cl.h>
 
 #define LOCAL_SIZE_X    16
 #define LOCAL_SIZE_Y    16

@@ -29,4 +29,9 @@
   #define REAL4x4 float4x4
 #endif /** _USE_DOUBLE_FP */
 
+#define _In_
+#define _Inout_
+#define _Out_
+#define _In_shared_(a)
+
 #endif /** __COMMON_CL_H__ */

@@ -1,46 +1,39 @@
-#include <common.cl.h>
+#include "config.cl.h"
 
-// #define NATIVE_DIVIDE
-
-#ifdef NATIVE_DIVIDE
-#define DIV_IMPL(a, b) native_divide((a), (b))
-#else
-#define DIV_IMPL(a, b) (a) / (b)
-#endif
-
-__kernel void cr_kernel(
-  __global REAL *a_d,
-  __global REAL *b_d,
-  __global REAL *c_d,
-  __global REAL *d_d,
-  __global REAL *x_d,
-  uint dimx,
-  uint iterations,
-  __local REAL *tile
+__kernel void cr_small_system(
+  _In_ __global const REAL *a_d,
+  _In_ __global const REAL *b_d,
+  _In_ __global const REAL *c_d,
+  _In_ __global const REAL *d_d,
+  _Out_ __global REAL *x_d,
+  _In_ uint dimx_eliminated,
+  _In_ uint iterations,
+  _In_ uint stride,
+  _In_shared_(dimx_eliminated * 5) __local REAL *tile
 ) {
 
   uint tid = get_local_id(0);
-
-  uint half_dimx = dimx >> 1;
+  uint half_dimx_eliminated = dimx_eliminated >> 1;
+  uint2 gi = (uint2)(tid, tid + half_dimx_eliminated) * stride;
 
   __local REAL *a = tile;
-  __local REAL *b = a + dimx;
-  __local REAL *c = b + dimx;
-  __local REAL *d = c + dimx;
-  __local REAL *x = d + dimx;
+  __local REAL *b = a + dimx_eliminated;
+  __local REAL *c = b + dimx_eliminated;
+  __local REAL *d = c + dimx_eliminated;
+  __local REAL *x = d + dimx_eliminated;
 
-  if(tid < dimx) {
-    a[tid] = a_d[tid];
-    b[tid] = b_d[tid];
-    c[tid] = c_d[tid];
-    d[tid] = d_d[tid];
+  if(tid < dimx_eliminated) {
+    a[tid] = a_d[gi.x];
+    b[tid] = b_d[gi.x];
+    c[tid] = c_d[gi.x];
+    d[tid] = d_d[gi.x];
 
-    uint tid2 = tid + half_dimx;
-    if(tid2 < dimx) {
-    a[tid2] = a_d[tid2];
-    b[tid2] = b_d[tid2];
-    c[tid2] = c_d[tid2];
-    d[tid2] = d_d[tid2];
+    uint tid2 = tid + half_dimx_eliminated;
+    if(tid2 < dimx_eliminated) {
+    a[tid2] = a_d[gi.y];
+    b[tid2] = b_d[gi.y];
+    c[tid2] = c_d[gi.y];
+    d[tid2] = d_d[gi.y];
     }
   }
   barrier(CLK_LOCAL_MEM_FENCE);
@@ -57,8 +50,8 @@ __kernel void cr_kernel(
     uint h = i + half_delta;
     uint l = i - half_delta;
 
-    if(i < dimx) {
-      if(h < dimx) {
+    if(i < dimx_eliminated) {
+      if(h < dimx_eliminated) {
         REAL k1 = DIV_IMPL(a[i], b[l]);
         REAL k2 = DIV_IMPL(c[i], b[h]);
 
@@ -84,11 +77,11 @@ __kernel void cr_kernel(
     uint i = delta - 1;
     uint j = i + delta;
 
-    if(j < dimx) {
+    if(j < dimx_eliminated) {
       REAL tmp = b[i]*b[j] - a[j]*c[i];
       x[i] = DIV_IMPL(d[i]*b[j] - d[j]*c[i], tmp);
       x[j] = DIV_IMPL(b[i]*d[j] - a[j]*d[i], tmp);
-    } else
+    } else if(i < dimx_eliminated)
       x[i] = DIV_IMPL(d[i], b[i]);
   }
 
@@ -102,9 +95,9 @@ __kernel void cr_kernel(
 
     if(tid == 0)
       x[i] = DIV_IMPL(d[i] - c[i] * x[j], b[i]);
-    else if(j < dimx)
+    else if(j < dimx_eliminated)
       x[i] = DIV_IMPL(d[i] - a[i] * x[i - half_delta] - c[i]*x[j], b[i]);
-    else if(i < dimx)
+    else if(i < dimx_eliminated)
       x[i] = DIV_IMPL(d[i] - a[i] * x[i - half_delta], b[i]);
 
     delta = half_delta;
@@ -112,10 +105,10 @@ __kernel void cr_kernel(
     barrier(CLK_LOCAL_MEM_FENCE);
   }
 
-  if(tid < dimx) {
-    x_d[tid] = x[tid];
-    uint tid2 = tid + half_dimx;
-    if(tid2 < dimx)
-      x_d[tid2] = x[tid2];
+  if(tid < dimx_eliminated) {
+    x_d[gi.x] = x[tid];
+    uint tid2 = tid + half_dimx_eliminated;
+    if(tid2 < dimx_eliminated)
+      x_d[gi.y] = x[tid2];
   }
 }

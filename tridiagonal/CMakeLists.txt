@@ -1,7 +1,10 @@
 project(tridiagonal)
 
 set(ocl_src_files
+  config.cl.h
   cr_kernels.cl
+  pcr_kernels.cl
+  cr_pcr_hybrid_kernels.cl
 )
 
 add_executable(
