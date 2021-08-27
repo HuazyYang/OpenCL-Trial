@@ -21,10 +21,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(COMMON_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 SET(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 
-include_directories(
-  "$ENV{INTELOCLSDKROOT}/include"
-  ${COMMON_INCLUDE_DIR}
-)
 
 # OpenGL staff
 SET(GLAD_SOURCE_DIR ${THIRD_PARTY_DIR}/glad-460-core/src/)  # OpenGL staff
@@ -48,6 +44,8 @@ include_directories("${OpenCL_INCLUDE_DIRS}")
 get_filename_component(OPENCL_LIBRARY_DIR "${OpenCL_LIBRARY}" DIRECTORY)
 message(STATUS "OpenCL link lib path: ${OPENCL_LIBRARY_DIR}")
 link_directories("${OPENCL_LIBRARY_DIR}")
+
+include_directories(${COMMON_INCLUDE_DIR})
 
 project(OpenGL-Trial VERSION 0.1.0)
 
