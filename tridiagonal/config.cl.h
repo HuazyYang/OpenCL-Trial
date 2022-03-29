@@ -1,4 +1,3 @@
-#include <opencl.h>
 #include <common.cl.h>
 
 // #define NATIVE_DIVIDE
